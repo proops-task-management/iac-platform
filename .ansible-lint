@@ -10,5 +10,10 @@ exclude_paths:
 # yaml formatting is enforced by the dedicated yamllint step — don't double-report it here.
 skip_list:
   - yaml
+  # Role dirs are kebab-case ON PURPOSE: k3s-server/k3s-agent mirror the EC2 `Role` tag
+  # (Role=k3s-server) that the aws_ec2 inventory filters on (IRD-016). Renaming to snake_case
+  # would desync the load-bearing tags + churn site.yml/cluster-up.sh/IRD-016. Local roles,
+  # not Galaxy-published, so the naming convention doesn't apply.
+  - role-name
 
 # Collections are pinned in ansible/requirements.yml; the CI job installs them before linting.
