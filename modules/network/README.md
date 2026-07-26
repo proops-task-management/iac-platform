@@ -40,3 +40,6 @@ module "network" {
   admin_cidr  = local.admin_cidr # coalesce(var.admin_cidr, checkip)
 }
 ```
+
+<!-- CI plan-proof (MIN-15): a modules/** change fires iac-pr-opened → per-root `terraform plan` (gha-iac-plan OIDC, read-only) + a plan comment on the PR. Discarded, not merged. -->
+
