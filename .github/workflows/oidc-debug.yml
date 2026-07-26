@@ -1,0 +1,33 @@
+name: oidc-debug
+# TEMP (MIN-15 diagnosis, DO NOT MERGE): prints the real OIDC token claims and tries a
+# DIRECT assume of gha-iac-plan (not via the cicd reusable) to isolate whether the reusable
+# indirection changes the `sub`. Delete this file once diagnosed.
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/oidc-debug.yml'
+      - 'modules/**'
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  debug:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Print OIDC token claims (sub/aud/repo)
+        run: |
+          set -euo pipefail
+          T=$(curl -sS -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
+                "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=sts.amazonaws.com" | jq -r .value)
+          python3 -c "import sys,json,base64; p=sys.argv[1].split('.')[1]; p+='='*(-len(p)%4); c=json.loads(base64.urlsafe_b64decode(p)); print(json.dumps({k:c.get(k) for k in ['sub','aud','repository','repository_owner','workflow_ref','job_workflow_ref','event_name','ref']}, indent=2))" "$T"
+
+      - name: Direct assume gha-iac-plan (bypass the reusable)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::339529820957:role/gha-iac-plan
+          aws-region: ap-southeast-1
+
+      - name: Who am I
+        run: aws sts get-caller-identity
