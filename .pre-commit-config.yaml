@@ -1,0 +1,33 @@
+# .pre-commit-config.yaml — iac-platform
+# Local pre-commit gate (mirrors cicd-platform's). Lints YAML + Ansible + workflow syntax
+# and blocks committed secrets before they reach CI or history. Install once:
+#   pre-commit install          # then hooks run on every `git commit`
+#   pre-commit run --all-files  # one-off full sweep
+# Pre-commit fetches each tool into its OWN managed venv — nothing is installed on your PATH,
+# and the operator ansible .venv is never touched. Pairs with the in-CI ansible-lint/yamllint
+# gate (iac-pr-opened.yml, MIN-52) — same tools + pins, earlier catch.
+repos:
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.18.4
+    hooks:
+      - id: gitleaks               # scan staged changes for credentials (IRD-021)
+
+  - repo: https://github.com/adrienverge/yamllint
+    rev: v1.35.1
+    hooks:
+      - id: yamllint
+        args: ["-c", ".yamllint.yaml"]
+
+  - repo: https://github.com/ansible/ansible-lint
+    rev: v24.10.0
+    hooks:
+      - id: ansible-lint           # uses .ansible-lint; matches the CI pin
+        language_version: python3.12          # 2.17.5 supports <=3.12; py3.14 breaks the import
+        additional_dependencies:
+          - "ansible-core==2.17.5"            # pin the matched toolchain (TSG-020 / MIN-52) —
+                                              # without this pre-commit pulls a too-new ansible-core
+
+  - repo: https://github.com/rhysd/actionlint
+    rev: v1.7.1
+    hooks:
+      - id: actionlint             # validate .github/workflows/*.yml syntax + expressions

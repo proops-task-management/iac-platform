@@ -26,3 +26,19 @@ rules:
 
   comments:
     min-spaces-from-content: 1   # `key: val  # note` is fine; default demands 2
+
+  # Ansible group_vars/defaults column-align their values for readability (deliberate D9/D10
+  # style, e.g. `k3s_token_ssm_path:     /proops/...`). Allow >1 space after the colon so
+  # alignment isn't flagged. This is the ONLY deviation from cicd-platform's base config —
+  # justified because this repo lints Ansible (aligned) whereas cicd lints workflows (not).
+  colons:
+    max-spaces-after: -1
+
+  # Required by ansible-lint's yamllint integration (it rejects a config lacking these and
+  # disables its fix mode otherwise). Not in cicd's base config because cicd has no ansible-lint.
+  comments-indentation: disable
+  braces:
+    max-spaces-inside: 1
+  octal-values:
+    forbid-implicit-octal: true
+    forbid-explicit-octal: true
