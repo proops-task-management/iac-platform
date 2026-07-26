@@ -1,0 +1,72 @@
+---
+# os-baseline — OS prep for k3s: packages, time sync, kernel modules, sysctl,
+# journald cap. Runs over SSM as root (play sets become: true), FIRST in site.yml.
+# Idempotent: dnf state=latest no-ops when current; modprobe persists; posix.sysctl
+# reloads only on change; journald drop-in restarts only on change; reboot gated on
+# needs-restarting.
+
+- name: Upgrade all OS packages (IRD-016)
+  ansible.builtin.dnf:
+    name: "*"
+    state: latest
+    update_cache: true
+  when: os_full_upgrade | bool
+
+- name: Install baseline packages (chrony, logrotate, dnf-utils)
+  ansible.builtin.dnf:
+    name: "{{ os_baseline_packages }}"
+    state: present
+
+- name: Enable + start chrony (time sync)
+  ansible.builtin.service:
+    name: chronyd
+    enabled: true
+    state: started
+
+- name: Load kernel modules for k3s (persist across reboot)
+  community.general.modprobe:
+    name: "{{ item }}"
+    state: present
+    persistent: present
+  loop: "{{ os_kernel_modules }}"
+
+- name: Apply sysctl for k3s networking (bridge keys need br_netfilter loaded first)
+  ansible.posix.sysctl:
+    name: "{{ item.key }}"
+    value: "{{ item.value }}"
+    sysctl_file: "{{ os_sysctl_file }}"
+    sysctl_set: true
+    state: present
+    reload: true
+  loop: "{{ os_sysctl | dict2items }}"
+
+- name: Ensure the journald drop-in dir exists
+  ansible.builtin.file:
+    path: /etc/systemd/journald.conf.d
+    state: directory
+    mode: "0755"
+
+- name: Cap journald disk usage (journald limits)
+  ansible.builtin.copy:
+    dest: /etc/systemd/journald.conf.d/99-proops.conf
+    mode: "0644"
+    content: |
+      [Journal]
+      SystemMaxUse={{ os_journald_max_use }}
+  notify: Restart systemd-journald
+
+# --- Reboot only if the package upgrade pulled a new kernel/core libs (P1-8) ---
+- name: Check whether a reboot is required
+  ansible.builtin.command: needs-restarting -r
+  register: needs_restart
+  changed_when: false
+  failed_when: false        # rc 1 = reboot needed, 0 = not — both non-fatal
+  when: os_full_upgrade | bool
+
+- name: Reboot the node to activate the new kernel
+  ansible.builtin.reboot:
+    reboot_timeout: 300
+    test_command: uptime    # SSM-friendly probe, not the SSH default
+  when:
+    - os_full_upgrade | bool
+    - needs_restart.rc | default(0) == 1

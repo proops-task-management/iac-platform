@@ -1,0 +1,76 @@
+name: review-plan
+
+# Agent C (IaC plan review) relay — lives in iac-platform (IRD-022 §Agent C, IRD-016).
+# A `/review-plan` comment on a PR resolves that PR's latest `iac-pr-opened` run (which
+# uploaded the tfplan artifact) and POSTs {repo, pr, run_id} to the fleet /iac-plan-review
+# endpoint; Agent C downloads the plan and posts an advisory SAFE / REVIEW / DO-NOT-APPLY
+# verdict. Advisory only — a human still applies.
+#
+# Self-skips cleanly until the org-level vars.FLEET_URL is set (D21 / Phase 8), so this is
+# safe to land now — the live end-to-end proof is carried to D21 (MIN-25).
+
+on:
+  issue_comment:
+    types: [created]
+
+permissions:
+  actions: read           # list runs to find the plan run
+  pull-requests: write    # post the acknowledgement comment
+
+jobs:
+  relay:
+    # A /review-plan comment, on a PR, by a MEMBER or OWNER — never a drive-by commenter.
+    if: >
+      github.event.issue.pull_request != null &&
+      contains(github.event.comment.body, '/review-plan') &&
+      (github.event.comment.author_association == 'OWNER' ||
+       github.event.comment.author_association == 'MEMBER')
+    runs-on: ubuntu-latest
+    steps:
+      - id: guard-fleet
+        name: Is the fleet endpoint configured yet?
+        env:
+          FLEET_URL: ${{ vars.FLEET_URL }}
+        run: |
+          if [ -n "$FLEET_URL" ]; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            echo "vars.FLEET_URL not set — Agent C relay skipped (expected before D21)."
+          fi
+
+      - id: resolve
+        name: Resolve the PR's latest plan run id
+        if: ${{ steps.guard-fleet.outputs.enabled == 'true' }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR: ${{ github.event.issue.number }}
+        run: |
+          set -euo pipefail
+          HEAD_SHA=$(gh pr view "$PR" --repo "$GITHUB_REPOSITORY" --json headRefOid -q .headRefOid)
+          RUN_ID=$(gh run list --repo "$GITHUB_REPOSITORY" --commit "$HEAD_SHA" \
+                     --workflow iac-pr-opened.yml --limit 1 --json databaseId -q '.[0].databaseId // ""')
+          echo "run_id=$RUN_ID" >> "$GITHUB_OUTPUT"
+          [ -n "$RUN_ID" ] && echo "Found plan run $RUN_ID" || echo "No iac-pr-opened run found for PR #$PR."
+
+      - name: POST to fleet /iac-plan-review
+        if: ${{ steps.guard-fleet.outputs.enabled == 'true' && steps.resolve.outputs.run_id != '' }}
+        env:
+          FLEET_URL: ${{ vars.FLEET_URL }}
+          REPO: ${{ github.repository }}
+          PR: ${{ github.event.issue.number }}
+          RUN_ID: ${{ steps.resolve.outputs.run_id }}
+        run: |
+          set -euo pipefail
+          curl -sSf -X POST "${FLEET_URL}/iac-plan-review" \
+            -H 'Content-Type: application/json' \
+            -d "$(jq -nc --arg repo "$REPO" --argjson pr "$PR" --argjson run_id "$RUN_ID" \
+                    '{repo:$repo, pr:$pr, run_id:$run_id}')"
+
+      - name: Acknowledge on the PR
+        if: ${{ steps.guard-fleet.outputs.enabled == 'true' && steps.resolve.outputs.run_id != '' }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh pr comment ${{ github.event.issue.number }} --repo "$GITHUB_REPOSITORY" \
+            --body "🤖 Agent C is reviewing the plan from run ${{ steps.resolve.outputs.run_id }} — verdict will follow (advisory)."

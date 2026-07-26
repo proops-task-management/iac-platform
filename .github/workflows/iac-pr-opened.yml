@@ -1,0 +1,96 @@
+name: iac-pr-opened
+
+# Thin caller (IRD-016 §IaC pipelines). On a PR touching Terraform or Ansible:
+#   - Terraform roots: fmt-check + validate + tflint + `plan` (per AFFECTED root) via
+#     reusable-iac.yml@v6, assuming the read-only gha-iac-plan OIDC role; the plan is
+#     posted as a PR comment + uploaded as an artifact for /review-plan (Agent C).
+#   - Ansible: ansible-lint + yamllint gate on a PINNED control-node toolchain (MIN-52,
+#     closes the TSG-020 version-skew debt).
+# No stored AWS keys — auth is GitHub->AWS OIDC (role built from vars.AWS_ACCOUNT_ID).
+
+on:
+  pull_request:
+    paths:
+      - "envs/**"
+      - "modules/**"
+      - "ansible/**"
+      - ".github/workflows/iac-pr-opened.yml"
+
+concurrency:
+  group: iac-plan-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  # Which roots does this PR affect? A modules/** change affects every root.
+  changes:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      global: ${{ steps.filter.outputs.global }}
+      k3s_dev: ${{ steps.filter.outputs.k3s_dev }}
+      ansible: ${{ steps.filter.outputs.ansible }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            global:
+              - 'envs/global/**'
+              - 'modules/**'
+            k3s_dev:
+              - 'envs/k3s-dev/**'
+              - 'modules/**'
+            ansible:
+              - 'ansible/**'
+
+  plan-global:
+    needs: changes
+    if: needs.changes.outputs.global == 'true'
+    permissions:
+      id-token: write
+      contents: read
+      pull-requests: write
+    uses: proops-task-management/cicd-platform/.github/workflows/reusable-iac.yml@v6
+    with:
+      action: plan
+      working-directory: envs/global
+      aws-role-arn: arn:aws:iam::${{ vars.AWS_ACCOUNT_ID }}:role/gha-iac-plan
+
+  plan-k3s-dev:
+    needs: changes
+    if: needs.changes.outputs.k3s_dev == 'true'
+    permissions:
+      id-token: write
+      contents: read
+      pull-requests: write
+    uses: proops-task-management/cicd-platform/.github/workflows/reusable-iac.yml@v6
+    with:
+      action: plan
+      working-directory: envs/k3s-dev
+      aws-role-arn: arn:aws:iam::${{ vars.AWS_ACCOUNT_ID }}:role/gha-iac-plan
+
+  # MIN-52 — Ansible lint gate on a pinned control-node toolchain (TSG-020). No AWS, no cluster.
+  ansible-lint:
+    needs: changes
+    if: needs.changes.outputs.ansible == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install pinned control-node toolchain
+        run: |
+          set -euo pipefail
+          python -m pip install --upgrade pip
+          # Pinned to avoid the ansible-core 2.21 / collection skew from TSG-020.
+          pip install "ansible-core==2.17.5" "ansible-lint==24.10.0" "yamllint==1.35.1"
+          ansible-galaxy collection install -r ansible/requirements.yml
+      - name: yamllint
+        run: yamllint ansible/
+      - name: ansible-lint
+        run: ansible-lint ansible/

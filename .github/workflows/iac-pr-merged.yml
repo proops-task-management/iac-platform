@@ -1,0 +1,67 @@
+name: iac-pr-merged
+
+# Thin caller (IRD-016 §IaC pipelines). On merge to main, `apply` the AFFECTED Terraform
+# root(s) via reusable-iac.yml@v6, assuming the gha-iac-apply OIDC role (RW, keeps the
+# DynamoDB state lock). Ansible is NOT applied by CI — the daily target is usually stopped;
+# `cluster-up.sh` runs the playbook (IRD-016 §daily-ops). No stored AWS keys.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "envs/**"
+      - "modules/**"
+
+concurrency:
+  group: iac-apply-main
+  cancel-in-progress: false   # never cancel an in-flight apply
+
+jobs:
+  changes:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      global: ${{ steps.filter.outputs.global }}
+      k3s_dev: ${{ steps.filter.outputs.k3s_dev }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            global:
+              - 'envs/global/**'
+              - 'modules/**'
+            k3s_dev:
+              - 'envs/k3s-dev/**'
+              - 'modules/**'
+
+  apply-global:
+    needs: changes
+    if: needs.changes.outputs.global == 'true'
+    permissions:
+      id-token: write
+      contents: read
+    uses: proops-task-management/cicd-platform/.github/workflows/reusable-iac.yml@v6
+    with:
+      action: apply
+      working-directory: envs/global
+      aws-role-arn: arn:aws:iam::${{ vars.AWS_ACCOUNT_ID }}:role/gha-iac-apply
+
+  apply-k3s-dev:
+    needs: [changes, apply-global]
+    # global holds OIDC roles / buckets / budgets that k3s-dev depends on — apply it first
+    # when both changed, but still run k3s-dev if only it changed (apply-global then skips).
+    if: |
+      always() &&
+      needs.changes.outputs.k3s_dev == 'true' &&
+      (needs.apply-global.result == 'success' || needs.apply-global.result == 'skipped')
+    permissions:
+      id-token: write
+      contents: read
+    uses: proops-task-management/cicd-platform/.github/workflows/reusable-iac.yml@v6
+    with:
+      action: apply
+      working-directory: envs/k3s-dev
+      aws-role-arn: arn:aws:iam::${{ vars.AWS_ACCOUNT_ID }}:role/gha-iac-apply

@@ -1,0 +1,15 @@
+---
+os_full_upgrade: true                 # dnf upgrade all pkgs (IRD-016). Set false for a fast daily start.
+os_baseline_packages:
+  - chrony                            # time sync
+  - logrotate                         # log rotation
+  - dnf-utils                         # provides needs-restarting (reboot check)
+os_kernel_modules:
+  - br_netfilter                      # k3s bridged traffic → iptables (required for the bridge sysctls)
+  - overlay                           # containerd overlayfs
+os_journald_max_use: "200M"           # cap journal disk usage (journald limits)
+os_sysctl_file: /etc/sysctl.d/99-k3s.conf
+os_sysctl:
+  net.ipv4.ip_forward: "1"
+  net.bridge.bridge-nf-call-iptables: "1"
+  net.bridge.bridge-nf-call-ip6tables: "1"

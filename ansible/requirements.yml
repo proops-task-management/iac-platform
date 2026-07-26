@@ -1,0 +1,16 @@
+---
+# Ansible collection dependencies — pinned (P0-4 / iac-basics §5 "never float versions").
+# Install: ansible-galaxy collection install -r ansible/requirements.yml
+# Verify the pins resolve against the installed ansible-core:
+#   ansible-galaxy collection list
+collections:
+  - name: amazon.aws          # aws_ec2 dynamic inventory + AWS modules
+    version: "9.0.0"
+  - name: community.aws       # aws_ssm CONNECTION plugin + ssm_parameter module
+    version: "9.0.0"
+  - name: kubernetes.core     # helm + k8s modules (argocd-bootstrap, on localhost)
+    version: "5.0.0"
+  - name: ansible.posix       # sysctl (os-baseline), profile_tasks callback (P0-4)
+    version: "1.6.0"
+  - name: community.general   # provides the `yaml` stdout callback (ansible.cfg)
+    version: "9.0.1"

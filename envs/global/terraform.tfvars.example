@@ -1,0 +1,25 @@
+# Copy to terraform.tfvars (gitignored) and override only what changes.
+# All keys below already have sensible defaults in variables.tf, so an empty
+# terraform.tfvars is valid for D4.
+
+# org        = "proops-task-management"
+# iac_repos  = ["iac-platform"]
+# ci_repos   = ["api-gateway", "user-service", "task-service", "notification-service", "frontend-service"]
+# ecr_repos  = ["api-gateway", "user-service", "task-service", "notification-service", "frontend-service"]
+
+# owner       = "minh_dt"
+# email       = "tuanminh.dinh.work@gmail.com"
+# cost_center = "training"
+
+# plan_artifacts_bucket_name = "proops-taskmgmt-global-s3-apse1-planartifacts"  # confirmed at D9
+
+# --- D9: dns / storage / budgets --------------------------------------------
+# domain: register a FREE DigitalPlat domain, then delegate its NS to this
+# zone's route53_name_servers output (MIN-13 decision B). Override once you
+# know your real name; a zone rename is a destroy+recreate, so set it before apply.
+# domain                = "proops-taskmgmt.dpdns.org"
+# dbbackups_bucket_name = "proops-taskmgmt-global-s3-apse1-dbbackups"
+# backup_retention_days = 14
+# monthly_limit_usd     = 30
+# total_limit_usd       = 180
+# alert_email           = "tuanminh.dinh.work@gmail.com"

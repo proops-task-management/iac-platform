@@ -1,0 +1,48 @@
+---
+# ===========================================================================
+# site.yml — provision a 2-node k3s cluster + bootstrap Argo CD, over SSM.
+# The play order is a HARD dependency, not cosmetic (P0-1): the agent reads the
+# join-token from SSM that the server writes, so server MUST complete first.
+#   Play 1  os-baseline   → all EC2 nodes (group `k3s`)
+#   Play 2  k3s-server    → server FIRST; writes token+IP to SSM (any_errors_fatal)
+#   Play 3  k3s-agent     → reads token from SSM, joins
+#   Play 4  argocd        → localhost/connection:local (NOT over SSM — P0-2)
+# Connection to the nodes = community.aws.aws_ssm (group_vars/k3s.yml). localhost
+# is not in group `k3s`, so Play 4 stays local.
+# ===========================================================================
+
+- name: Baseline OS prep (all k3s nodes)
+  hosts: k3s
+  become: true
+  gather_facts: true
+  roles:
+    - os-baseline
+
+- name: Install the k3s server (writes token + server-ip to SSM)
+  hosts: k3s_server
+  become: true
+  gather_facts: true
+  any_errors_fatal: true          # if the server fails, never attempt the agent
+  roles:
+    - k3s-server
+
+- name: Join the k3s agent (reads token + server-ip from SSM)
+  hosts: k3s_agent
+  become: true
+  gather_facts: true
+  roles:
+    - k3s-agent
+
+- name: Bootstrap Argo CD (control node — talks to the k8s API, not a node OS)
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  become: false
+  # Load the shared vars EXPLICITLY (MIN-52 / TSG-020 class): implicit-localhost
+  # group_vars/all scoping varies by ansible-core version, so a differently-pinned CI
+  # runner could leave argocd_namespace/chart_version/kubeconfig_local_path undefined
+  # here. vars_files keeps one source of truth (group_vars/all.yml) without that risk.
+  vars_files:
+    - group_vars/all.yml
+  roles:
+    - argocd-bootstrap

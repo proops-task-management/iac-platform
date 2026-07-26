@@ -1,0 +1,28 @@
+# .yamllint.yaml — house yamllint config (same ruleset as cicd-platform's @v6 config).
+# Lints the Ansible layer (ansible/**) in the iac-pr-opened gate (MIN-52). yamllint
+# auto-discovers this file by name (.yamllint / .yamllint.yaml / .yamllint.yml).
+extends: default
+
+# .artifacts/ holds the runtime-fetched kubeconfig (gitignored) — not source YAML to lint.
+ignore: |
+  ansible/.artifacts/
+
+rules:
+  # Expressions/args routinely exceed 80 chars and cannot wrap. Warn past 120 so
+  # genuinely runaway lines still surface, but never error.
+  line-length:
+    max: 120
+    level: warning
+
+  # YAML 1.1 sees on/off/yes/no as booleans; allow the canonical set so keys aren't
+  # flagged. Still catches real typos.
+  truthy:
+    allowed-values: ["true", "false", "on", "off"]
+    check-keys: true
+
+  indentation:
+    spaces: 2
+    indent-sequences: consistent
+
+  comments:
+    min-spaces-from-content: 1   # `key: val  # note` is fine; default demands 2

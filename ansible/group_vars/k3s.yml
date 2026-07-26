@@ -1,0 +1,14 @@
+---
+# SSM connection — binds ONLY to the EC2 nodes (group `k3s`), never to localhost.
+# The aws_ssm plugin stages the ephemeral module in an S3 bucket and the instance
+# pulls it with its OWN role → the node IAM role needs s3:* on this bucket (P0-5).
+ansible_connection:                community.aws.aws_ssm
+ansible_aws_ssm_region:            ap-southeast-1
+ansible_aws_ssm_bucket_name:       proops-taskmgmt-global-s3-apse1-planartifacts
+ansible_aws_ssm_s3_addressing_style: virtual
+ansible_python_interpreter:        /usr/bin/python3
+# session-manager-plugin location. The aws_ssm plugin DEFAULTS to the Intel-Homebrew
+# path /usr/local/bin/session-manager-plugin; on Apple Silicon brew installs it at
+# /opt/homebrew/bin, and a Linux CI runner uses /usr/local/bin — so resolve it from
+# PATH at run time instead of hardcoding (portable across laptop arch + CI runner).
+ansible_aws_ssm_plugin:            "{{ lookup('pipe', 'command -v session-manager-plugin') }}"

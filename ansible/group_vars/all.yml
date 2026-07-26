@@ -1,0 +1,27 @@
+---
+# Cross-role shared values (NO secrets, NO connection vars — those live in k3s.yml).
+# Secret VALUES never appear here; only SSM paths (IRD-019 / P1-7).
+aws_region: ap-southeast-1
+
+# --- k3s (pinned — iac-basics §5). Verify against https://github.com/k3s-io/k3s/releases
+#     before the Step-3 run; bumping is a one-line change here. ---
+k3s_version: "v1.31.5+k3s1"
+k3s_token_ssm_path:     /proops/dev/k3s/token       # SecureString (P1-7)
+k3s_server_ip_ssm_path: /proops/dev/k3s/server-ip
+
+# --- Cluster identity / TLS (P0-2b). The server's PUBLIC ip is discovered at runtime
+#     by the k3s-server role and appended to tls-san + used to rewrite the kubeconfig. ---
+cluster_domain: proops-taskmgmt.dpdns.org
+# tls-san entries known ahead of time (public IP added at runtime):
+k3s_tls_san_static:
+  - "{{ cluster_domain }}"
+  - "argocd.{{ cluster_domain }}"
+
+# --- Argo CD bootstrap (pinned chart; root app-of-apps GATED off until D12 — Decision B).
+#     Verify chart version at https://github.com/argoproj/argo-helm before Step 3. ---
+argocd_namespace: platform
+argocd_chart_version: "7.7.10"
+argocd_bootstrap_root_app: false        # flip true at D12 when the `deploy` repo exists
+
+# --- Local artifact (gitignored — P1-7). The fetched, URL-rewritten kubeconfig. ---
+kubeconfig_local_path: "{{ playbook_dir }}/.artifacts/kubeconfig"

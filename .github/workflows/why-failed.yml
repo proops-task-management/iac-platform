@@ -1,0 +1,17 @@
+name: Why Failed — Agent B relay
+
+# Thin caller: a MEMBER/OWNER comments `/why-failed` on a PR -> delegate to the platform's
+# reusable relay (IRD-022 Agent B). It resolves the PR's latest failed run and POSTs it to
+# vars.FLEET_URL/ci-failed. Self-skips until FLEET_URL is a real value (D21).
+# GOTCHA: issue_comment workflows always run from the DEFAULT branch, so this must be on main.
+on:
+  issue_comment:
+    types: [created]
+
+jobs:
+  why-failed:
+    if: ${{ github.event.issue.pull_request != null && contains(github.event.comment.body, '/why-failed') }}
+    permissions:
+      actions: read
+      pull-requests: write
+    uses: proops-task-management/cicd-platform/.github/workflows/reusable-why-failed.yml@v6

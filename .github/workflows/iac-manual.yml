@@ -1,0 +1,52 @@
+name: iac-manual
+
+# Manual, guarded apply/destroy of a single Terraform root (IRD-016 §IaC pipelines).
+# DESTROY IS MANUAL-ONLY and never runs automatically anywhere else. The `confirm` input
+# must be typed to EXACTLY match `root` or the run aborts before touching AWS. Auth is the
+# gha-iac-apply OIDC role (no stored AWS keys).
+
+on:
+  workflow_dispatch:
+    inputs:
+      root:
+        description: "Terraform root to operate on"
+        type: choice
+        required: true
+        options:
+          - envs/global
+          - envs/k3s-dev
+      action:
+        description: "apply | destroy"
+        type: choice
+        required: true
+        options:
+          - apply
+          - destroy
+      confirm:
+        description: "Type the root again to confirm (must equal `root`)"
+        type: string
+        required: true
+
+jobs:
+  guard:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Confirm matches root
+        run: |
+          set -euo pipefail
+          if [ "${{ inputs.confirm }}" != "${{ inputs.root }}" ]; then
+            echo "::error::confirm ('${{ inputs.confirm }}') must exactly equal root ('${{ inputs.root }}'). Aborting."
+            exit 1
+          fi
+          echo "Confirmed: ${{ inputs.action }} on ${{ inputs.root }}"
+
+  run:
+    needs: guard
+    permissions:
+      id-token: write
+      contents: read
+    uses: proops-task-management/cicd-platform/.github/workflows/reusable-iac.yml@v6
+    with:
+      action: ${{ inputs.action }}
+      working-directory: ${{ inputs.root }}
+      aws-role-arn: arn:aws:iam::${{ vars.AWS_ACCOUNT_ID }}:role/gha-iac-apply

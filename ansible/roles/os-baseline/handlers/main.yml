@@ -1,0 +1,7 @@
+---
+# Handler-triggered restart (P1-5 / iac-basics §6: `restarted` is not idempotent,
+# so it fires only when the journald drop-in actually changes).
+- name: Restart systemd-journald
+  ansible.builtin.systemd:
+    name: systemd-journald
+    state: restarted

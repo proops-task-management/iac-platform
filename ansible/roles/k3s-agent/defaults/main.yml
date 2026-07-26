@@ -1,0 +1,3 @@
+---
+# Role-local. Cross-role values (k3s_version, SSM paths, aws_region) → group_vars/all.yml.
+k3s_install_url: "https://get.k3s.io"

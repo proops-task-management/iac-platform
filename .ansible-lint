@@ -1,0 +1,14 @@
+---
+# ansible-lint config for the Ansible layer (MIN-52 gate). Paths relative to repo root.
+profile: moderate
+
+exclude_paths:
+  - .venv/
+  - ansible/.artifacts/
+  - .github/
+
+# yaml formatting is enforced by the dedicated yamllint step — don't double-report it here.
+skip_list:
+  - yaml
+
+# Collections are pinned in ansible/requirements.yml; the CI job installs them before linting.

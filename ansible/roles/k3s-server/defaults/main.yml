@@ -1,0 +1,8 @@
+---
+# Role-local paths (overridable). Cross-role values (k3s_version, SSM paths,
+# tls-san list, kubeconfig_local_path) live in group_vars/all.yml.
+k3s_install_url:       "https://get.k3s.io"
+k3s_config_dir:        /etc/rancher/k3s
+k3s_config_file:       /etc/rancher/k3s/config.yaml
+k3s_kubeconfig_remote: /etc/rancher/k3s/k3s.yaml
+k3s_node_token_path:   /var/lib/rancher/k3s/server/node-token

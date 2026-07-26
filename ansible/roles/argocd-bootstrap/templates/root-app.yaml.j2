@@ -1,0 +1,23 @@
+# Root app-of-apps — Argo CD manages everything else from the `deploy` repo (IRD-017).
+# Applied ONLY when argocd_bootstrap_root_app=true (flipped at D12). Until then this
+# template exists but is never applied, so Argo CD installs clean with no failing app.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: root
+  namespace: {{ argocd_namespace }}
+spec:
+  project: default
+  source:
+    repoURL: {{ deploy_repo_url }}
+    targetRevision: {{ deploy_repo_target_revision }}
+    path: {{ deploy_repo_root_path }}
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: {{ argocd_namespace }}
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true

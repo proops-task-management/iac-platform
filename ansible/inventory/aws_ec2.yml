@@ -1,0 +1,28 @@
+---
+# Dynamic inventory — query EC2 by tag at runtime; no static IPs (iac-basics §6 / IRD-016).
+# Requires AWS creds on the control node (operator SSO) + the amazon.aws collection.
+plugin: amazon.aws.aws_ec2
+regions:
+  - ap-southeast-1
+filters:
+  tag:Project: proops-taskmgmt
+  instance-state-name: running
+
+# Group by the Role tag. The tag value is `k3s-server` / `k3s-agent` (hyphen), but
+# Ansible group names cannot contain hyphens — with prefix/separator empty, the value
+# is sanitized `-`→`_`, yielding groups `k3s_server` / `k3s_agent` (P0-1: site.yml
+# `hosts:` must match these). Every matched node also joins group `k3s`, where the
+# SSM connection vars live (group_vars/k3s.yml) — so localhost never inherits them.
+keyed_groups:
+  - key: tags.Role
+    prefix: ''
+    separator: ''
+groups:
+  k3s: true
+
+# SSM addresses the node by INSTANCE ID, not IP — do NOT compose a public_ip here
+# (that is the SSH pattern from iac-basics §6, wrong for aws_ssm).
+hostnames:
+  - instance-id
+compose:
+  ansible_host: instance_id

@@ -1,0 +1,11 @@
+# Managed by Ansible (k3s-server role) — k3s reads this at /etc/rancher/k3s/config.yaml.
+# Server flags live HERE (templated), not in a long INSTALL_K3S_EXEC string (P1-5).
+# tls-san MUST carry the public IP + domain so kubectl/Argo over the public endpoint
+# passes the cert SAN check (P0-2b). Traefik + servicelb stay ENABLED (IRD-016).
+write-kubeconfig-mode: "0644"
+tls-san:
+{% for san in k3s_tls_san %}
+  - "{{ san }}"
+{% endfor %}
+node-label:
+  - "node-role.proops/server=true"

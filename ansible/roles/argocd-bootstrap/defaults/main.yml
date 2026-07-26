@@ -1,0 +1,10 @@
+---
+# Helm chart source (chart_repo_url avoids a separate `helm repo add`).
+argocd_chart_ref:      argo-cd
+argocd_chart_repo_url: https://argoproj.github.io/argo-helm
+
+# Root app-of-apps → the `deploy` repo. Finalized by IRD-017 at D12; GATED off
+# (group_vars: argocd_bootstrap_root_app: false) until that repo exists (Decision B).
+deploy_repo_url:             https://github.com/proops-task-management/deploy.git
+deploy_repo_target_revision: main
+deploy_repo_root_path:       bootstrap

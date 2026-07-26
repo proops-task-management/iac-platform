@@ -1,0 +1,35 @@
+# Terraform
+**/.terraform/*
+*.tfstate
+*.tfstate.*
+crash.log
+crash.*.log
+*.tfvars
+*.tfvars.json
+!*.tfvars.example
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+*.tfplan
+# reusable-iac.yml@v6 plan outputs (`terraform plan -out=tfplan` + `terraform show > plan.txt`)
+# — CI-runner artifacts; ignore the bare names too so a local plan never commits them.
+tfplan
+plan.txt
+# NOTE: .terraform.lock.hcl is intentionally NOT ignored — commit it so provider
+# versions (AWS ~> 6.0) are reproducible across machines and CI.
+
+# Python venv for the Ansible control-node toolchain (ansible + boto3 + kubernetes;
+# PEP 668 blocks system pip on Homebrew Python — TSG-019). Never commit it.
+.venv/
+
+# Ansible / operator artifacts (added at D9)
+*.retry
+kubeconfig
+# Fetched, URL-rewritten kubeconfig + any run-local artifacts (P1-7 — credentials)
+ansible/.artifacts/
+
+# Secrets env for seed-ssm.sh — the real file lives in $HOME, but guard the
+# repo too so a stray copy is never committed. The template is allowed.
+*.env
+!*.env.example

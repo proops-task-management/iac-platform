@@ -1,0 +1,45 @@
+---
+# argocd-bootstrap — runs on the CONTROL node (localhost), NOT over SSM (P0-2):
+# helm + the root app talk to the k8s API (6443), not a node's OS. Uses the
+# URL-rewritten kubeconfig the k3s-server role fetched. Requires `helm` on the
+# control node (kubernetes.core.helm). Idempotent: helm upgrade --install; k8s apply.
+
+- name: Ensure the Argo CD namespace exists
+  kubernetes.core.k8s:
+    api_version: v1
+    kind: Namespace
+    name: "{{ argocd_namespace }}"
+    state: present
+    kubeconfig: "{{ kubeconfig_local_path }}"
+
+- name: Install / upgrade Argo CD (pinned chart)
+  kubernetes.core.helm:
+    name: argocd
+    chart_ref: "{{ argocd_chart_ref }}"
+    chart_repo_url: "{{ argocd_chart_repo_url }}"
+    chart_version: "{{ argocd_chart_version }}"
+    release_namespace: "{{ argocd_namespace }}"
+    create_namespace: false
+    kubeconfig: "{{ kubeconfig_local_path }}"
+    atomic: true
+    wait: true
+
+- name: Wait for the Argo CD server to be Available (AC-10-16 — pods Running in platform)
+  kubernetes.core.k8s_info:
+    kind: Deployment
+    namespace: "{{ argocd_namespace }}"
+    name: argocd-server
+    kubeconfig: "{{ kubeconfig_local_path }}"
+    wait: true
+    wait_condition:
+      type: Available
+      status: "True"
+    wait_timeout: 300
+
+# --- Root app-of-apps: GATED off until the deploy repo exists (D12, Decision B) ---
+- name: Apply the root app-of-apps (only when enabled at D12)
+  kubernetes.core.k8s:
+    state: present
+    definition: "{{ lookup('template', 'root-app.yaml.j2') | from_yaml }}"
+    kubeconfig: "{{ kubeconfig_local_path }}"
+  when: argocd_bootstrap_root_app | bool
