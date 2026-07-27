@@ -21,10 +21,20 @@ resource "aws_iam_openid_connect_provider" "github" {
 }
 
 locals {
-  # Subject claims per trust group: repo:<org>/<repo>:*  (any branch/tag/env).
-  iac_subs = [for r in var.iac_repos : "repo:${var.org}/${r}:*"]
-  ci_subs  = [for r in var.ci_repos : "repo:${var.org}/${r}:*"]
-  ecr_subs = [for r in var.ecr_repos : "repo:${var.org}/${r}:*"]
+  # OIDC trust keying. AWS REQUIRES the trust to condition on `sub` (or `job_workflow_ref`) — a
+  # `repository`-only trust is rejected with MalformedPolicyDocument ("must evaluate ... sub or
+  # job_workflow_ref ... not scoped to all"). BUT this org emits ID-augmented subjects
+  # (`repo:<org>@<owner_id>/<repo>@<repo_id>:<event>` — GitHub's immutable-id OIDC format), which a
+  # plain `sub` StringLike `repo:<org>/<repo>:*` never matches. So we match BOTH the standard and
+  # augmented sub shapes (wildcards on the numeric ids) AND additionally pin the clean `repository`
+  # claim (StringEquals, format-independent) as defense in depth. (MIN-15 / TSG-023.)
+  iac_subs = flatten([for r in var.iac_repos : ["repo:${var.org}/${r}:*", "repo:${var.org}@*/${r}@*:*"]])
+  ci_subs  = flatten([for r in var.ci_repos : ["repo:${var.org}/${r}:*", "repo:${var.org}@*/${r}@*:*"]])
+  ecr_subs = flatten([for r in var.ecr_repos : ["repo:${var.org}/${r}:*", "repo:${var.org}@*/${r}@*:*"]])
+
+  iac_repos_q = [for r in var.iac_repos : "${var.org}/${r}"]
+  ci_repos_q  = [for r in var.ci_repos : "${var.org}/${r}"]
+  ecr_repos_q = [for r in var.ecr_repos : "${var.org}/${r}"]
 
   # ARNs built from live account/region so no account literal is committed.
   ssm_ci_arn       = "arn:aws:ssm:${data.aws_region.current.region}:${data.aws_caller_identity.current.account_id}:parameter${var.ssm_ci_path}"
@@ -33,8 +43,9 @@ locals {
 }
 
 # ---------------------------------------------------------------------------
-# Trust policies (one per subject set). aud is pinned to sts.amazonaws.com;
-# sub is StringLike on the repo list.
+# Trust policies (one per subject set). aud pinned to sts.amazonaws.com; sub StringLike on the
+# repo list (both standard + ID-augmented shapes, AWS-required); repository StringEquals as a
+# clean, format-independent second gate.
 # ---------------------------------------------------------------------------
 data "aws_iam_policy_document" "trust_iac" {
   statement {
@@ -48,6 +59,11 @@ data "aws_iam_policy_document" "trust_iac" {
       test     = "StringEquals"
       variable = "token.actions.githubusercontent.com:aud"
       values   = ["sts.amazonaws.com"]
+    }
+    condition {
+      test     = "StringEquals"
+      variable = "token.actions.githubusercontent.com:repository"
+      values   = local.iac_repos_q
     }
     condition {
       test     = "StringLike"
@@ -71,6 +87,11 @@ data "aws_iam_policy_document" "trust_ci" {
       values   = ["sts.amazonaws.com"]
     }
     condition {
+      test     = "StringEquals"
+      variable = "token.actions.githubusercontent.com:repository"
+      values   = local.ci_repos_q
+    }
+    condition {
       test     = "StringLike"
       variable = "token.actions.githubusercontent.com:sub"
       values   = local.ci_subs
@@ -90,6 +111,11 @@ data "aws_iam_policy_document" "trust_ecr" {
       test     = "StringEquals"
       variable = "token.actions.githubusercontent.com:aud"
       values   = ["sts.amazonaws.com"]
+    }
+    condition {
+      test     = "StringEquals"
+      variable = "token.actions.githubusercontent.com:repository"
+      values   = local.ecr_repos_q
     }
     condition {
       test     = "StringLike"
