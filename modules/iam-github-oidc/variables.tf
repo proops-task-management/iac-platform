@@ -35,6 +35,12 @@ variable "plan_artifacts_bucket_name" {
   description = "Name of the plan-artifacts S3 bucket (created by the storage module at D9). The plan role gets RW here for /review-plan artifacts."
 }
 
+variable "lock_table_name" {
+  type        = string
+  default     = "proops-taskmgmt-tflock-apse1"
+  description = "Terraform remote-state DynamoDB lock table (matches backend.tf). The apply role needs Get/Put/DeleteItem on it to take the state lock; the plan role uses -lock=false and does not."
+}
+
 variable "iac_apply_actions" {
   type        = list(string)
   description = <<-EOT

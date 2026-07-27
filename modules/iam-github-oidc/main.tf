@@ -40,6 +40,7 @@ locals {
   ssm_ci_arn       = "arn:aws:ssm:${data.aws_region.current.region}:${data.aws_caller_identity.current.account_id}:parameter${var.ssm_ci_path}"
   plan_bucket_arn  = "arn:aws:s3:::${var.plan_artifacts_bucket_name}"
   plan_objects_arn = "arn:aws:s3:::${var.plan_artifacts_bucket_name}/*"
+  lock_table_arn   = "arn:aws:dynamodb:${data.aws_region.current.region}:${data.aws_caller_identity.current.account_id}:table/${var.lock_table_name}"
 }
 
 # ---------------------------------------------------------------------------
@@ -172,6 +173,14 @@ data "aws_iam_policy_document" "iac_apply" {
     # TODO(D9): replace resources=["*"] with the real root ARNs once the
     # global/k3s-dev modules exist. iam:* here allows role creation (needed to
     # manage the gha-* + instance roles) — add a permissions boundary at D9.
+  }
+  statement {
+    # apply MUST take the Terraform state lock (plan uses -lock=false, so the
+    # plan role never needed this). Scoped to the one backend lock table.
+    sid       = "TerraformStateLock"
+    effect    = "Allow"
+    actions   = ["dynamodb:GetItem", "dynamodb:PutItem", "dynamodb:DeleteItem"]
+    resources = [local.lock_table_arn]
   }
 }
 
