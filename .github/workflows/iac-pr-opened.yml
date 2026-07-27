@@ -21,7 +21,8 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  # Which roots does this PR affect? A modules/** change affects every root.
+  # Which roots does this PR affect? Each root is triggered by ONLY the modules it consumes
+  # (see the filter below) — a change to one root's module never triggers the other (TSG-026).
   changes:
     runs-on: ubuntu-latest
     permissions:
@@ -35,13 +36,21 @@ jobs:
       - uses: dorny/paths-filter@v3
         id: filter
         with:
+          # Map each root to ONLY the modules it consumes (kept identical to iac-pr-merged so
+          # plan + apply agree on which root a change affects). A broad `modules/**` over-triggered
+          # every root — harmless at plan ($0) but it must match the merged filter that gates the
+          # metered apply (TSG-026). Maintain: add a module line when a root starts consuming it.
           filters: |
             global:
               - 'envs/global/**'
-              - 'modules/**'
+              - 'modules/iam-github-oidc/**'
+              - 'modules/dns/**'
+              - 'modules/storage/**'
+              - 'modules/cost-guardrails/**'
             k3s_dev:
               - 'envs/k3s-dev/**'
-              - 'modules/**'
+              - 'modules/network/**'
+              - 'modules/compute-k3s/**'
             ansible:
               - 'ansible/**'
 
