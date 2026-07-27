@@ -21,7 +21,8 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  # Which roots does this PR affect? A modules/** change affects every root.
+  # Which roots does this PR affect? Each root is triggered by ONLY the modules it consumes
+  # (see the filter below) — a change to one root's module never triggers the other (TSG-026).
   changes:
     runs-on: ubuntu-latest
     permissions:
