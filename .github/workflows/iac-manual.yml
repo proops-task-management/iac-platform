@@ -45,6 +45,7 @@ jobs:
     permissions:
       id-token: write
       contents: read
+      pull-requests: write   # reusable-iac@v6 declares this; caller must grant ≥ what the reusable requests (same contract as iac-pr-merged)
     uses: proops-task-management/cicd-platform/.github/workflows/reusable-iac.yml@v6
     with:
       action: ${{ inputs.action }}

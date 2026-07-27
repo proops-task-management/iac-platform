@@ -43,6 +43,7 @@ jobs:
     permissions:
       id-token: write
       contents: read
+      pull-requests: write   # reusable-iac@v6 declares this (plan PR-comment step); caller must grant ≥ what the reusable requests, even though apply never comments
     uses: proops-task-management/cicd-platform/.github/workflows/reusable-iac.yml@v6
     with:
       action: apply
@@ -60,6 +61,7 @@ jobs:
     permissions:
       id-token: write
       contents: read
+      pull-requests: write   # same reusable-iac@v6 permission contract as apply-global above
     uses: proops-task-management/cicd-platform/.github/workflows/reusable-iac.yml@v6
     with:
       action: apply
