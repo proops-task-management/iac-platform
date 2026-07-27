@@ -29,13 +29,26 @@ jobs:
       - uses: dorny/paths-filter@v3
         id: filter
         with:
+          # Map each root to ONLY the modules it consumes. A broad `modules/**` here applied
+          # EVERY root on any module change, so an IAM-only change (iam-github-oidc, global-only)
+          # once auto-launched the metered k3s-dev cluster on merge (TSG-026). Trade-off: this
+          # list is maintained — when a root starts consuming a new module, add it here, or its
+          # apply under-triggers. Under-trigger (a missed apply, visible in the PR) is a safer
+          # failure than over-trigger (a silent metered launch).
+          # RESIDUAL RISK (tracked, tech-debt): a genuine k3s-dev module/env change merged while
+          # the cluster is destroyed still auto-CREATEs the EC2. A reconcile-only guard (skip
+          # apply-k3s-dev when it would create from empty state) is the follow-up — MIN-56.
           filters: |
             global:
               - 'envs/global/**'
-              - 'modules/**'
+              - 'modules/iam-github-oidc/**'
+              - 'modules/dns/**'
+              - 'modules/storage/**'
+              - 'modules/cost-guardrails/**'
             k3s_dev:
               - 'envs/k3s-dev/**'
-              - 'modules/**'
+              - 'modules/network/**'
+              - 'modules/compute-k3s/**'
 
   apply-global:
     needs: changes
