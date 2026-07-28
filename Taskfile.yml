@@ -1,0 +1,81 @@
+# Taskfile.yml — local task runner for iac-platform (go-task: https://taskfile.dev)
+# Wraps the same gates CI runs, so a contributor can reproduce them locally before pushing.
+# Install go-task: `brew install go-task`. List tasks: `task` or `task --list`.
+# CI remains the enforced gate (IRD-015/IRD-021); this is the fast local mirror (IRD-014 hygiene).
+#
+# Mirrors cicd-platform/Taskfile.yml, plus this repo's two extra concerns: the Ansible layer
+# (ansible-lint, pinned control-node toolchain — MIN-52/TSG-020) and Terraform static checks.
+#
+# DELIBERATELY ABSENT: apply / destroy / plan-against-AWS. Anything that can start the meter is
+# an operator decision run explicitly (`scripts/cluster-up.sh` or the `iac-manual` workflow), never
+# a one-word local alias. Every task below is read-only and $0 — none of them touches AWS.
+
+version: "3"
+
+tasks:
+  default:
+    desc: List available tasks
+    cmds:
+      - task --list
+    silent: true
+
+  hooks:
+    desc: Install the git pre-commit hooks (run once per clone — until then commits are NOT linted)
+    cmds:
+      - pre-commit install
+
+  lint:
+    desc: Run all pre-commit hooks against every file (gitleaks + yamllint + ansible-lint + actionlint)
+    cmds:
+      - pre-commit run --all-files
+
+  actionlint:
+    desc: Validate GitHub Actions workflow syntax + expressions only
+    cmds:
+      - pre-commit run actionlint --all-files
+
+  yamllint:
+    desc: Lint YAML style only (uses .yamllint.yaml)
+    cmds:
+      - pre-commit run yamllint --all-files
+
+  ansible-lint:
+    desc: Lint the Ansible layer only (uses .ansible-lint; pinned ansible-core 2.17.5 per TSG-020)
+    cmds:
+      - pre-commit run ansible-lint --all-files
+
+  secrets:
+    desc: Scan for committed secrets only (gitleaks)
+    cmds:
+      - pre-commit run gitleaks --all-files
+
+  update-hooks:
+    desc: Bump pinned pre-commit hook versions to latest (review the diff before committing)
+    cmds:
+      - pre-commit autoupdate
+
+  fmt:
+    desc: Rewrite Terraform files to canonical format (the only task here that edits files)
+    cmds:
+      - terraform fmt -recursive
+
+  fmt-check:
+    desc: Check Terraform formatting without editing — the same gate reusable-iac@v6 runs first
+    cmds:
+      - terraform fmt -check -recursive
+
+  validate:
+    desc: terraform init -backend=false + validate on every root ($0 — no backend, no AWS calls)
+    cmds:
+      - for: ["envs/global", "envs/k3s-dev"]
+        cmd: |
+          echo "==> {{.ITEM}}"
+          terraform -chdir={{.ITEM}} init -backend=false -input=false >/dev/null
+          terraform -chdir={{.ITEM}} validate
+
+  check:
+    desc: Everything CI checks statically — fmt-check + validate + all pre-commit hooks
+    cmds:
+      - task: fmt-check
+      - task: validate
+      - task: lint
