@@ -5,11 +5,15 @@ name: iac-manual
 # must be typed to EXACTLY match `root` or the run aborts before touching AWS. Auth is the
 # gha-iac-apply OIDC role (no stored AWS keys).
 #
-# THIS IS ALSO THE FIRST-CREATE PATH for the metered `envs/k3s-dev` root (MIN-56): `iac-pr-merged`
+# THIS IS THE FIRST-CREATE PATH for the metered `envs/k3s-dev` root (MIN-56): `iac-pr-merged`
 # is reconcile-only and skips `apply-k3s-dev` when no cluster exists, so building the cluster from
-# empty state happens HERE (root=envs/k3s-dev, action=apply, confirm=envs/k3s-dev) or via
-# `scripts/cluster-up.sh` — always with a human confirming the meter (~$1/day). The `confirm==root`
-# guard below is that human step; nothing here runs automatically.
+# empty state happens HERE (root=envs/k3s-dev, action=apply, confirm=envs/k3s-dev) — or by a local
+# `terraform apply` in that root — always with a human confirming the meter (~$1/day). The
+# `confirm==root` guard below is that human step; nothing here runs automatically.
+#
+# NOT `scripts/cluster-up.sh`: that script is stopped -> running only. It discovers instances by
+# tag and hard-fails ("instances not found by tag — is envs/k3s-dev applied?") against empty state,
+# so it cannot create. After a `terraform destroy` the order is: apply (here) -> cluster-up.sh.
 
 on:
   workflow_dispatch:
