@@ -72,7 +72,8 @@ jobs:
   # RECONCILE-ONLY GUARD (MIN-56, closes the TSG-026 residual risk). `terraform apply` is
   # state-driven: against EMPTY state it does not "update" anything, it CREATES the 2x t3.medium
   # metered cluster. CI must only ever RECONCILE a cluster the operator already started — creating
-  # it is a cost decision, and cost decisions are made by a human (`iac-manual`, or cluster-up.sh).
+  # it is a cost decision, and cost decisions are made by a human (`iac-manual`, or a local
+  # `terraform apply` — NOT cluster-up.sh, which cannot create from empty state).
   # This job answers exactly one question: does a k3s-server node already exist?
   #   * Tags, not SSM, are the truth: /proops/dev/k3s/server-ip survives a `terraform destroy`
   #     (Ansible owns it, Terraform doesn't) and would report a ghost cluster as alive. tag:Project
@@ -148,9 +149,11 @@ jobs:
             echo "**The merged change is NOT applied — git and AWS are now out of sync until you next open the window.**"
             echo ""
             echo "To apply it, either:"
-            echo "1. \`cluster-up.sh\` (normal daily path — Terraform apply + Ansible converge), or"
-            echo "2. the \`iac-manual\` workflow: \`root=envs/k3s-dev\`, \`action=apply\`, \`confirm=envs/k3s-dev\`, or"
-            echo "3. set \`ALLOW_K3S_DEV_CREATE=true\` and re-run this workflow to let CI create it."
+            echo "1. the \`iac-manual\` workflow: \`root=envs/k3s-dev\`, \`action=apply\`, \`confirm=envs/k3s-dev\` — **this is the path for the state you are in now** (destroyed = nothing to start, only Terraform can create), or"
+            echo "2. a local \`terraform apply\` in \`envs/k3s-dev\`, then \`cluster-up.sh\` to converge Ansible, or"
+            echo "3. set \`ALLOW_K3S_DEV_CREATE=true\` and re-run this workflow to let CI create it (remember to set it back to \`false\`)."
+            echo ""
+            echo "> \`cluster-up.sh\` alone will NOT work here: it is a *stopped → running* script that discovers instances by tag and hard-fails with \`instances not found by tag — is envs/k3s-dev applied?\`. It starts and converges an existing cluster; it never creates one."
           } >> "$GITHUB_STEP_SUMMARY"
 
   apply-k3s-dev:

@@ -14,7 +14,10 @@ on:
       - "envs/**"
       - "modules/**"
       - "ansible/**"
-      - ".github/workflows/iac-pr-opened.yml"
+      # ALL workflows, not just this one. Previously only `iac-pr-opened.yml` self-triggered,
+      # so a change to iac-pr-merged / iac-manual / review-plan / why-failed reached `main`
+      # with NO CI lint at all — including `guard-k3s-dev`, the cost control (MIN-56).
+      - ".github/workflows/**"
 
 concurrency:
   group: iac-plan-${{ github.event.pull_request.number }}
@@ -31,6 +34,7 @@ jobs:
       global: ${{ steps.filter.outputs.global }}
       k3s_dev: ${{ steps.filter.outputs.k3s_dev }}
       ansible: ${{ steps.filter.outputs.ansible }}
+      workflows: ${{ steps.filter.outputs.workflows }}
     steps:
       - uses: actions/checkout@v4
       - uses: dorny/paths-filter@v3
@@ -53,6 +57,8 @@ jobs:
               - 'modules/compute-k3s/**'
             ansible:
               - 'ansible/**'
+            workflows:
+              - '.github/workflows/**'
 
   plan-global:
     needs: changes
@@ -103,3 +109,36 @@ jobs:
         run: yamllint ansible/
       - name: ansible-lint
         run: ansible-lint ansible/
+
+  # Workflow lint gate. actionlint resolves `needs.<job>.outputs.*` against the job that actually
+  # declares them, validates `vars.`/`secrets.` contexts, and shellchecks every `run:` block — it
+  # is what confirmed `guard-k3s-dev`'s wiring (MIN-56). Until 2026-07-28 it ran ONLY in the local
+  # pre-commit hook, so a workflow edit committed without `task hooks` installed reached `main`
+  # unchecked. .pre-commit-config.yaml claims "same tools + pins" parity with this workflow —
+  # that was true for yamllint/ansible-lint but actionlint had no CI counterpart. Pinned to the
+  # SAME rev as pre-commit (v1.7.1) so local and CI can never disagree (the TSG-020 lesson).
+  workflow-lint:
+    needs: changes
+    if: needs.changes.outputs.workflows == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install pinned actionlint
+        env:
+          ACTIONLINT_VERSION: "1.7.1"   # keep in lockstep with .pre-commit-config.yaml
+        run: |
+          set -euo pipefail
+          curl -fsSL -o actionlint.tar.gz \
+            "https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz"
+          tar -xzf actionlint.tar.gz actionlint
+          install -m 0755 actionlint /usr/local/bin/actionlint
+          actionlint --version
+      - name: actionlint
+        run: actionlint -color
+      - name: yamllint (workflows)
+        run: |
+          set -euo pipefail
+          pip install "yamllint==1.35.1"
+          yamllint -c .yamllint.yaml .github/workflows/
