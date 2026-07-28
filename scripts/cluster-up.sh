@@ -4,8 +4,11 @@
 # cluster with Argo CD, in one command (IRD-016 §daily-ops, IRD-014 standards).
 #
 # Sequence: discover instances by tag -> start -> wait SSM online ->
-# ansible-playbook site.yml (idempotent; fetches + rewrites kubeconfig) ->
-# upsert Route 53 A records to the new public IP -> gate on 2 nodes Ready.
+# upsert Route 53 A records to the new public IP + wait for DNS -> ansible-playbook
+# site.yml (idempotent; fetches + rewrites kubeconfig) -> gate on 2 nodes Ready.
+# DNS BEFORE ANSIBLE is load-bearing (MIN-54): the kubeconfig targets k8s.<domain>, and
+# the same playbook run bootstraps Argo CD through it, so the name must already point at
+# today's IP. (Before MIN-54 the kubeconfig held the raw IP, so DNS could lag safely.)
 # Target: <= 5 minutes from stopped (AC-10-18). The AWS meter is running while up.
 #
 # Usage: ./scripts/cluster-up.sh
@@ -16,7 +19,10 @@ set -euo pipefail
 PROJECT="${PROJECT:-proops-taskmgmt}"
 REGION="${REGION:-ap-southeast-1}"
 DOMAIN="${DOMAIN:-proops-taskmgmt.dpdns.org}"
-SUBDOMAINS=(app api argocd grafana)
+# `k8s` is the control-plane endpoint the kubeconfig targets (MIN-54) — it must stay in
+# this list and must match `k3s_api_host` in ansible/group_vars/all.yml.
+SUBDOMAINS=(app api argocd grafana k8s)
+API_HOST="k8s.$DOMAIN"
 ANSIBLE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../ansible" && pwd)"
 ARTIFACTS="$ANSIBLE_DIR/.artifacts"
 KUBECONFIG_ARTIFACT="$ARTIFACTS/kubeconfig"
@@ -27,6 +33,7 @@ warn() { printf '\033[1;33m[up] WARN:\033[0m %s\n' "$*"; }
 die()  { printf '\033[1;31m[up] ERROR:\033[0m %s\n' "$*" >&2; exit 1; }
 
 command -v aws >/dev/null            || die "aws CLI not found"
+command -v dig >/dev/null            || die "dig not found (bind tools) — needed to confirm DNS before the playbook"
 command -v ansible-playbook >/dev/null || die "ansible-playbook not found (install collections: ansible-galaxy collection install -r ansible/requirements.yml)"
 
 # 1) Discover instance IDs by tag — same source of truth as the Ansible inventory.
@@ -65,12 +72,11 @@ for id in $ALL_IDS; do
   [[ "$status" == "Online" ]] || die "SSM never came Online for $id"
 done
 
-# 4) Configure the cluster (idempotent; the k3s-server role fetches + URL-rewrites
-#    the kubeconfig into $KUBECONFIG_ARTIFACT and bootstraps Argo CD).
-log "ansible-playbook site.yml…"
-( cd "$ANSIBLE_DIR" && ansible-playbook site.yml )
-
-# 5) Upsert Route 53 A records → the server's (new) public IP (IP churns each start).
+# 4) Upsert Route 53 A records → the server's (new) public IP (the IP churns each start).
+#    THIS MUST RUN BEFORE THE PLAYBOOK (MIN-54). The kubeconfig the k3s-server role writes
+#    now targets k8s.<domain> instead of the raw IP, and Play 4 (argocd-bootstrap) uses that
+#    kubeconfig in the same run — so the name has to resolve to TODAY's address before
+#    Ansible starts, or the bootstrap would talk to yesterday's (dead) IP.
 PUBLIC_IP="$(aws ec2 describe-instances --region "$REGION" --instance-ids "$SERVER_ID" \
   --query 'Reservations[0].Instances[0].PublicIpAddress' --output text)"
 [[ -n "$PUBLIC_IP" && "$PUBLIC_IP" != "None" ]] || die "server has no public IP"
@@ -82,8 +88,29 @@ changes=""
 for sub in "${SUBDOMAINS[@]}"; do
   changes+="{\"Action\":\"UPSERT\",\"ResourceRecordSet\":{\"Name\":\"$sub.$DOMAIN\",\"Type\":\"A\",\"TTL\":60,\"ResourceRecords\":[{\"Value\":\"$PUBLIC_IP\"}]}},"
 done
-aws route53 change-resource-record-sets --hosted-zone-id "$ZONE_ID" \
-  --change-batch "{\"Changes\":[${changes%,}]}" >/dev/null
+CHANGE_ID="$(aws route53 change-resource-record-sets --hosted-zone-id "$ZONE_ID" \
+  --change-batch "{\"Changes\":[${changes%,}]}" --query 'ChangeInfo.Id' --output text)"
+
+# Route 53 accepts the change before it is live on its nameservers — wait for INSYNC,
+# then confirm THIS host actually resolves the new address (the previous record's 60s
+# TTL can still be cached locally). Both waits are cheap and prevent a bootstrap that
+# fails on stale DNS — the exact failure the reordering above exists to avoid.
+log "waiting for the Route 53 change to be INSYNC…"
+aws route53 wait resource-record-sets-changed --id "$CHANGE_ID"
+log "waiting for $API_HOST to resolve → $PUBLIC_IP…"
+resolved=""
+for _ in $(seq 1 24); do                      # 24×5s = 120s > the 60s record TTL
+  resolved="$(dig +short "$API_HOST" A | tail -n1)"
+  [[ "$resolved" == "$PUBLIC_IP" ]] && break
+  sleep 5
+done
+[[ "$resolved" == "$PUBLIC_IP" ]] \
+  || die "$API_HOST still resolves to '${resolved:-nothing}' (want $PUBLIC_IP) — stale DNS cache; re-run in a minute"
+
+# 5) Configure the cluster (idempotent; the k3s-server role fetches + URL-rewrites
+#    the kubeconfig into $KUBECONFIG_ARTIFACT and bootstraps Argo CD).
+log "ansible-playbook site.yml…"
+( cd "$ANSIBLE_DIR" && ansible-playbook site.yml )
 
 # 6) Readiness gate: 2 nodes Ready.
 export KUBECONFIG="$KUBECONFIG_ARTIFACT"

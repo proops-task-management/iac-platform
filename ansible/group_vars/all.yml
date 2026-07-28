@@ -9,11 +9,19 @@ k3s_version: "v1.31.5+k3s1"
 k3s_token_ssm_path:     /proops/dev/k3s/token       # SecureString (P1-7)
 k3s_server_ip_ssm_path: /proops/dev/k3s/server-ip
 
-# --- Cluster identity / TLS (P0-2b). The server's PUBLIC ip is discovered at runtime
-#     by the k3s-server role and appended to tls-san + used to rewrite the kubeconfig. ---
+# --- Cluster identity / TLS (P0-2b, revised by MIN-54).
+#     The API endpoint is a STABLE DNS NAME, never the runtime public IP: the daily
+#     stop/start assigns a new public IP, so an IP-based tls-san re-rendered the server
+#     config every morning → the `Restart k3s` handler fired → `changed=3` forever
+#     (D10/MIN-14 idempotency caveat, DOP-010 AC-10-17). `cluster-up.sh` upserts
+#     k8s.<domain> → the new IP BEFORE the playbook runs, so the name is stable while
+#     the address behind it churns. Only the server's PRIVATE IP stays in tls-san — the
+#     agent joins node-to-node and private addressing does not change across a restart. ---
 cluster_domain: proops-taskmgmt.dpdns.org
-# tls-san entries known ahead of time (public IP added at runtime):
+k3s_api_host: "k8s.{{ cluster_domain }}"     # control-plane endpoint (kubeconfig + tls-san)
+# tls-san entries — all STATIC. The runtime public IP is deliberately NOT here (MIN-54).
 k3s_tls_san_static:
+  - "{{ k3s_api_host }}"
   - "{{ cluster_domain }}"
   - "argocd.{{ cluster_domain }}"
 

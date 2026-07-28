@@ -3,23 +3,25 @@
 # fetch a URL-rewritten kubeconfig for the localhost bootstrap (P0-2b).
 # Runs over SSM as root (play sets become: true).
 
-- name: Gather EC2 metadata (public IP for tls-san + kubeconfig rewrite)
-  amazon.aws.ec2_metadata_facts:
-
 - name: Ensure the k3s config dir exists
   ansible.builtin.file:
     path: "{{ k3s_config_dir }}"
     state: directory
     mode: "0755"
 
-- name: Render k3s server config (tls-san incl. public IP)
+# MIN-54: every SAN here is STABLE across a stop/start, so this template renders
+# byte-identical every morning → no `Restart k3s` → a true `changed=0` (AC-10-17).
+# The runtime PUBLIC IP is deliberately absent: it churns daily and was the sole
+# reason the config re-rendered. Reaching the API by name (k8s.<domain>, upserted by
+# cluster-up.sh) is what replaces it. The PRIVATE IP stays — the agent joins the
+# server node-to-node on it, and it survives a restart unchanged.
+- name: Render k3s server config (tls-san = stable names + private IP, no public IP)
   ansible.builtin.template:
     src: config.yaml.j2
     dest: "{{ k3s_config_file }}"
     mode: "0644"
   vars:
-    # static SANs (domain, argocd.domain) + runtime public & private IPs
-    k3s_tls_san: "{{ k3s_tls_san_static + [ansible_ec2_public_ipv4, ansible_default_ipv4.address] }}"
+    k3s_tls_san: "{{ k3s_tls_san_static + [ansible_default_ipv4.address] }}"
   notify: Restart k3s
 
 - name: Install k3s server (pinned; Traefik ON; reads config.yaml)
@@ -91,13 +93,17 @@
   connection: local
   become: false
 
-- name: Write the URL-rewritten kubeconfig locally (127.0.0.1 → public IP)
+- name: Write the URL-rewritten kubeconfig locally (127.0.0.1 → k8s.<domain>)
   ansible.builtin.copy:
-    # server URL must point at the reachable public endpoint, not localhost-on-the-Mac
+    # The server URL must be reachable from the control node (not localhost-on-the-Mac)
+    # AND stable across a stop/start — hence the DNS name, not the churning public IP
+    # (MIN-54). The name is already a tls-san entry, so the cert check passes.
+    # PREREQUISITE: cluster-up.sh upserts k8s.<domain> → the new public IP BEFORE this
+    # play runs; otherwise Play 4 (argocd-bootstrap) would resolve yesterday's address.
     content: >-
       {{ k3s_kubeconfig_b64.content | b64decode
          | replace('https://127.0.0.1:6443',
-                   'https://' ~ ansible_ec2_public_ipv4 ~ ':6443') }}
+                   'https://' ~ k3s_api_host ~ ':6443') }}
     dest: "{{ kubeconfig_local_path }}"
     mode: "0600"
   delegate_to: localhost
