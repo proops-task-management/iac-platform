@@ -4,6 +4,11 @@ name: iac-pr-merged
 # root(s) via reusable-iac.yml@v6, assuming the gha-iac-apply OIDC role (RW, keeps the
 # DynamoDB state lock). Ansible is NOT applied by CI — the daily target is usually stopped;
 # `cluster-up.sh` runs the playbook (IRD-016 §daily-ops). No stored AWS keys.
+#
+# CI IS RECONCILE-ONLY for the metered root: `apply-k3s-dev` runs only when the cluster ALREADY
+# exists (see `guard-k3s-dev` — MIN-56/TSG-026). Creating it is a cost decision a human makes, via
+# `iac-manual` or `cluster-up.sh`; the admin-only repo variable ALLOW_K3S_DEV_CREATE=true is the
+# one documented way to let CI create it. `envs/global` (~$0, apply-once) is not guarded.
 
 on:
   push:
@@ -35,9 +40,8 @@ jobs:
           # list is maintained — when a root starts consuming a new module, add it here, or its
           # apply under-triggers. Under-trigger (a missed apply, visible in the PR) is a safer
           # failure than over-trigger (a silent metered launch).
-          # RESIDUAL RISK (tracked, tech-debt): a genuine k3s-dev module/env change merged while
-          # the cluster is destroyed still auto-CREATEs the EC2. A reconcile-only guard (skip
-          # apply-k3s-dev when it would create from empty state) is the follow-up — MIN-56.
+          # The residual risk this left — a genuine k3s-dev change merged while the cluster is
+          # destroyed would still auto-CREATE the EC2 — is closed by `guard-k3s-dev` below (MIN-56).
           filters: |
             global:
               - 'envs/global/**'
@@ -63,14 +67,101 @@ jobs:
       working-directory: envs/global
       aws-role-arn: arn:aws:iam::${{ vars.AWS_ACCOUNT_ID }}:role/gha-iac-apply
 
+  # RECONCILE-ONLY GUARD (MIN-56, closes the TSG-026 residual risk). `terraform apply` is
+  # state-driven: against EMPTY state it does not "update" anything, it CREATES the 2x t3.medium
+  # metered cluster. CI must only ever RECONCILE a cluster the operator already started — creating
+  # it is a cost decision, and cost decisions are made by a human (`iac-manual`, or cluster-up.sh).
+  # This job answers exactly one question: does a k3s-server node already exist?
+  #   * Tags, not SSM, are the truth: /proops/dev/k3s/server-ip survives a `terraform destroy`
+  #     (Ansible owns it, Terraform doesn't) and would report a ghost cluster as alive. tag:Project
+  #     + tag:Role is the same source the Ansible inventory + cluster-up.sh use (IRD-016 §daily-ops).
+  #   * A STOPPED instance still EXISTS: cluster-down.sh and the 23:00-ICT auto-stop leave nodes
+  #     `stopped`, so filtering on `running` alone would wrongly skip every out-of-hours reconcile.
+  #     Only terminated/shutting-down count as gone.
+  #   * Read-only by construction: assumes gha-iac-plan (ReadOnlyAccess) — a cost gate must not
+  #     itself hold the power to create (IRD-015 §OIDC).
+  guard-k3s-dev:
+    needs: changes
+    if: needs.changes.outputs.k3s_dev == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+    outputs:
+      exists: ${{ steps.check.outputs.exists }}
+    steps:
+      - name: Configure AWS credentials (OIDC, read-only plan role)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::${{ vars.AWS_ACCOUNT_ID }}:role/gha-iac-plan
+          aws-region: ap-southeast-1
+          role-session-name: gha-iac-guard-${{ github.run_id }}
+
+      - name: Does the k3s-dev cluster already exist?
+        id: check
+        env:
+          ALLOW_CREATE: ${{ vars.ALLOW_K3S_DEV_CREATE }}
+        run: |
+          set -euo pipefail
+          ids="$(aws ec2 describe-instances \
+            --filters \
+              'Name=tag:Project,Values=proops-taskmgmt' \
+              'Name=tag:Role,Values=k3s-server' \
+              'Name=instance-state-name,Values=pending,running,stopping,stopped' \
+            --query 'Reservations[].Instances[].InstanceId' \
+            --output text)"
+
+          if [ -n "$ids" ]; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+            echo "::notice::k3s-dev cluster exists ($ids) — apply-k3s-dev will RECONCILE it."
+            {
+              echo "### Reconcile-only guard: PASS"
+              echo "k3s-server found (\`$ids\`) — \`apply-k3s-dev\` reconciles the existing cluster."
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          echo "exists=false" >> "$GITHUB_OUTPUT"
+
+          # The hatch is deliberately stateful (a repo variable an admin must set AND unset), so
+          # nag on every run it carries — a forgotten `true` must never silently disarm the guard.
+          if [ "${ALLOW_CREATE:-}" = "true" ]; then
+            echo "::warning::No k3s-dev cluster exists, but ALLOW_K3S_DEV_CREATE=true — CI will CREATE the metered cluster (~\$1/day). Set the variable back to false once this create is done."
+            {
+              echo "### Reconcile-only guard: BYPASSED via ALLOW_K3S_DEV_CREATE"
+              echo "No cluster exists, but the repo variable \`ALLOW_K3S_DEV_CREATE=true\` authorises a create."
+              echo "**\`apply-k3s-dev\` will CREATE 2x t3.medium (~\$1/day).**"
+              echo "Run \`gh variable set ALLOW_K3S_DEV_CREATE --body false\` as soon as this run completes."
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          # Skip, don't fail: a destroyed cluster is the designed steady state here, so failing
+          # would make red-on-main the normal colour for k3s-dev merges and devalue the signal.
+          echo "::warning::k3s-dev change merged while the cluster is destroyed — apply-k3s-dev SKIPPED so CI does not start the meter. The merged change is NOT applied to AWS."
+          {
+            echo "### Reconcile-only guard: SKIPPED \`apply-k3s-dev\`"
+            echo "No \`k3s-server\` instance exists (\`tag:Project=proops-taskmgmt\`), so applying would **create** the metered cluster instead of reconciling it."
+            echo ""
+            echo "**The merged change is NOT applied — git and AWS are now out of sync until you next open the window.**"
+            echo ""
+            echo "To apply it, either:"
+            echo "1. \`cluster-up.sh\` (normal daily path — Terraform apply + Ansible converge), or"
+            echo "2. the \`iac-manual\` workflow: \`root=envs/k3s-dev\`, \`action=apply\`, \`confirm=envs/k3s-dev\`, or"
+            echo "3. set \`ALLOW_K3S_DEV_CREATE=true\` and re-run this workflow to let CI create it."
+          } >> "$GITHUB_STEP_SUMMARY"
+
   apply-k3s-dev:
-    needs: [changes, apply-global]
+    needs: [changes, guard-k3s-dev, apply-global]
     # global holds OIDC roles / buckets / budgets that k3s-dev depends on — apply it first
     # when both changed, but still run k3s-dev if only it changed (apply-global then skips).
+    # The guard clause is what keeps CI reconcile-only (MIN-56): apply only when the cluster
+    # already exists, or when an admin has explicitly opened the ALLOW_K3S_DEV_CREATE hatch.
     if: |
       always() &&
       needs.changes.outputs.k3s_dev == 'true' &&
-      (needs.apply-global.result == 'success' || needs.apply-global.result == 'skipped')
+      (needs.apply-global.result == 'success' || needs.apply-global.result == 'skipped') &&
+      (needs.guard-k3s-dev.outputs.exists == 'true' || vars.ALLOW_K3S_DEV_CREATE == 'true')
     permissions:
       id-token: write
       contents: read
