@@ -2,6 +2,16 @@
 # k3s-dev — the daily cluster root. Assembles network + compute-k3s.
 # DNS A records are NOT here — cluster-up.sh (D10) upserts them into the zone
 # owned by the `global` root (the node IP changes on every start).
+#
+# THIS ROOT IS METERED (~$1/day, 2x t3.medium). Merging a change here does NOT
+# necessarily apply it: `iac-pr-merged` is reconcile-only on this root, so
+# `guard-k3s-dev` skips the apply (warning + job summary, green run) whenever no
+# k3s-server instance exists. Creating the cluster from empty state is a human
+# cost decision — `iac-manual` (root=envs/k3s-dev, action=apply,
+# confirm=envs/k3s-dev) or a local `terraform apply` here. NOT cluster-up.sh:
+# that is a stopped -> running script and hard-fails against empty state.
+# So after a `terraform destroy`, expect your merged change to sit UNAPPLIED
+# until the next window — that is by design (MIN-56 / TSG-026), not a failure.
 # ===========================================================================
 
 # --- admin_cidr: hybrid (explicit var OR auto-detected public IP) -----------

@@ -7,8 +7,10 @@ name: iac-pr-merged
 #
 # CI IS RECONCILE-ONLY for the metered root: `apply-k3s-dev` runs only when the cluster ALREADY
 # exists (see `guard-k3s-dev` — MIN-56/TSG-026). Creating it is a cost decision a human makes, via
-# `iac-manual` or `cluster-up.sh`; the admin-only repo variable ALLOW_K3S_DEV_CREATE=true is the
-# one documented way to let CI create it. `envs/global` (~$0, apply-once) is not guarded.
+# `iac-manual` (or a local `terraform apply` in envs/k3s-dev) — NOT `cluster-up.sh`, which is a
+# stopped -> running script and hard-fails against empty state. The admin-only repo variable
+# ALLOW_K3S_DEV_CREATE=true is the one documented way to let CI create it. `envs/global`
+# (~$0, apply-once) is not guarded.
 
 on:
   push:
