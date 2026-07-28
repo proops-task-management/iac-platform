@@ -4,6 +4,12 @@ name: iac-manual
 # DESTROY IS MANUAL-ONLY and never runs automatically anywhere else. The `confirm` input
 # must be typed to EXACTLY match `root` or the run aborts before touching AWS. Auth is the
 # gha-iac-apply OIDC role (no stored AWS keys).
+#
+# THIS IS ALSO THE FIRST-CREATE PATH for the metered `envs/k3s-dev` root (MIN-56): `iac-pr-merged`
+# is reconcile-only and skips `apply-k3s-dev` when no cluster exists, so building the cluster from
+# empty state happens HERE (root=envs/k3s-dev, action=apply, confirm=envs/k3s-dev) or via
+# `scripts/cluster-up.sh` — always with a human confirming the meter (~$1/day). The `confirm==root`
+# guard below is that human step; nothing here runs automatically.
 
 on:
   workflow_dispatch:
