@@ -156,7 +156,11 @@ scripts/            daily-ops bash suite (IRD-014 standards)
 ## Verify workflow (authoring is $0 — apply is not)
 
 ```bash
-# static (read-only, $0)
+# one-word local gate via go-task (Taskfile.yml, mirrors cicd-platform)
+task hooks     # ONCE per clone — installs .git/hooks/pre-commit; until then commits are NOT linted
+task check     # fmt-check + validate (both roots) + every pre-commit hook. All $0, no AWS calls.
+
+# static (read-only, $0) — what `task check` wraps
 terraform -chdir=envs/<root> init -backend=false && terraform -chdir=envs/<root> validate
 terraform fmt -recursive -check    # + tflint + gitleaks in CI / pre-commit
 
