@@ -18,7 +18,7 @@ set -euo pipefail
 
 PROJECT="${PROJECT:-proops-taskmgmt}"
 REGION="${REGION:-ap-southeast-1}"
-DOMAIN="${DOMAIN:-proops-taskmgmt.dpdns.org}"
+DOMAIN="${DOMAIN:-taskmgmt.dpdns.org}"
 # `k8s` is the control-plane endpoint the kubeconfig targets (MIN-54) — it must stay in
 # this list and must match `k3s_api_host` in ansible/group_vars/all.yml.
 SUBDOMAINS=(app api argocd grafana k8s)
