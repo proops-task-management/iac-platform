@@ -97,7 +97,10 @@ CHANGE_ID="$(aws route53 change-resource-record-sets --hosted-zone-id "$ZONE_ID"
 # fails on stale DNS — the exact failure the reordering above exists to avoid.
 log "waiting for the Route 53 change to be INSYNC…"
 aws route53 wait resource-record-sets-changed --id "$CHANGE_ID"
-log "waiting for $API_HOST to resolve → $PUBLIC_IP…"
+# NOTE: braces are load-bearing here. `$PUBLIC_IP…` (unbraced, immediately followed by the
+# multi-byte ellipsis) made bash swallow the first byte of U+2026 into the identifier and abort
+# under `set -u` with `PUBLIC_IP\xe2: unbound variable`. Brace any expansion that abuts non-ASCII.
+log "waiting for ${API_HOST} to resolve → ${PUBLIC_IP}…"
 resolved=""
 for _ in $(seq 1 24); do                      # 24×5s = 120s > the 60s record TTL
   resolved="$(dig +short "$API_HOST" A | tail -n1)"
