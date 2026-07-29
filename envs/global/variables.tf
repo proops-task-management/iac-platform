@@ -66,8 +66,8 @@ variable "plan_artifacts_bucket_name" {
 
 variable "domain" {
   type        = string
-  default     = "proops-taskmgmt.dpdns.org"
-  description = "Apex domain for the Route 53 zone. Free DigitalPlat domain (MIN-13 option B); delegate its NS to route53_name_servers. Override in tfvars once registered."
+  default     = "taskmgmt.dpdns.org"
+  description = "Apex domain for the Route 53 zone. Free DigitalPlat domain (MIN-13 option B), registered 2026-07-29, expires 2027-07-29. Delegate its NS to route53_name_servers — a zone without delegation resolves nothing (TSG-029, IRD-016 §Prerequisites). Renamed from proops-taskmgmt.* (MIN-59): that name was already taken at the registrar."
 }
 
 variable "dbbackups_bucket_name" {

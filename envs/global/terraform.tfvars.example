@@ -17,7 +17,9 @@
 # domain: register a FREE DigitalPlat domain, then delegate its NS to this
 # zone's route53_name_servers output (MIN-13 decision B). Override once you
 # know your real name; a zone rename is a destroy+recreate, so set it before apply.
-# domain                = "proops-taskmgmt.dpdns.org"
+# Gate before anything metered: `dig +short NS <domain>` must return the 4 awsdns
+# names — an undelegated zone resolves nothing while apply still goes green (TSG-029).
+# domain                = "taskmgmt.dpdns.org"
 # dbbackups_bucket_name = "proops-taskmgmt-global-s3-apse1-dbbackups"
 # backup_retention_days = 14
 # monthly_limit_usd     = 30

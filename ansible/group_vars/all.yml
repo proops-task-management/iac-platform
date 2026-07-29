@@ -17,7 +17,7 @@ k3s_server_ip_ssm_path: /proops/dev/k3s/server-ip
 #     k8s.<domain> → the new IP BEFORE the playbook runs, so the name is stable while
 #     the address behind it churns. Only the server's PRIVATE IP stays in tls-san — the
 #     agent joins node-to-node and private addressing does not change across a restart. ---
-cluster_domain: proops-taskmgmt.dpdns.org
+cluster_domain: taskmgmt.dpdns.org
 k3s_api_host: "k8s.{{ cluster_domain }}"     # control-plane endpoint (kubeconfig + tls-san)
 # tls-san entries — all STATIC. The runtime public IP is deliberately NOT here (MIN-54).
 k3s_tls_san_static:
