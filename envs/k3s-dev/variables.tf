@@ -39,13 +39,16 @@ variable "region_code" {
   description = "Short region code for 6-part resource names (ap-southeast-1 -> apse1)."
 }
 
+# ⏳ SUNSET — this variable is deleted by MIN-50 (private k3s API via SSM
+# port-forward): no public 6443 rule => nothing consumes admin_cidr. IRD-016 §Sunset.
 # admin_cidr: null => auto-detect the applier's public IP (laptop applies, D9/D10).
-# Set explicitly in tfvars once the IaC pipeline applies from CI (D11) so the SG
-# opens 6443 to YOUR IP, not the runner's — and to stop per-IP drift (MIN-13).
+# From CI it is supplied as TF_VAR_admin_cidr, sourced from the iac-platform ADMIN_CIDR
+# secret via reusable-iac@v6's `tf-vars` channel — so the SG opens 6443 to YOU, never to
+# the runner (MIN-58). See envs/k3s-dev/main.tf for the full path table.
 variable "admin_cidr" {
   type        = string
   default     = null
-  description = "Operator /32 allowed on k3s API 6443. null => auto-detect via checkip.amazonaws.com."
+  description = "Operator /32 allowed on k3s API 6443. null => auto-detect via checkip.amazonaws.com (laptop); set via TF_VAR_admin_cidr from the ADMIN_CIDR secret in CI."
 }
 
 variable "instance_type" {

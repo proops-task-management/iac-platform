@@ -50,6 +50,27 @@ jobs:
           fi
           echo "Confirmed: ${{ inputs.action }} on ${{ inputs.root }}"
 
+      # SUNSET: this step + the `tf-vars:` block on the `run` job are deleted by MIN-50
+      # (private k3s API via SSM port-forward). See IRD-016 §Sunset.
+      #
+      # MIN-58 — this is the FIRST-CREATE path for the metered root, so it is the run most
+      # likely to write the 6443 rule from scratch. Without a pinned admin_cidr the root
+      # auto-detects the RUNNER's public IP and the freshly created cluster is unreachable
+      # by kubectl from the moment it exists. Folded into the existing guard job rather than
+      # a separate one: iac-manual already has a human-confirmation gate, and this is the
+      # same class of pre-flight check.
+      - name: ADMIN_CIDR secret must be set (metered root only)
+        if: inputs.root == 'envs/k3s-dev'
+        env:
+          ADMIN_CIDR: ${{ secrets.ADMIN_CIDR }}
+        run: |
+          set -euo pipefail
+          if [ -z "${ADMIN_CIDR:-}" ]; then
+            echo "::error::ADMIN_CIDR secret is not set. This ${{ inputs.action }} on envs/k3s-dev would bind the 6443 rule to the RUNNER's IP, leaving the cluster unreachable by kubectl (MIN-58). Set it with: gh secret set ADMIN_CIDR --repo proops-task-management/iac-platform --body '<your-ip>/32'"
+            exit 1
+          fi
+          echo "ADMIN_CIDR is set — TF_VAR_admin_cidr will pin the 6443 rule to the operator /32."
+
   run:
     needs: guard
     permissions:
@@ -61,3 +82,8 @@ jobs:
       action: ${{ inputs.action }}
       working-directory: ${{ inputs.root }}
       aws-role-arn: arn:aws:iam::${{ vars.AWS_ACCOUNT_ID }}:role/gha-iac-apply
+    secrets:
+      # Passed unconditionally — `root` is a RUNTIME input, so a reusable-workflow call
+      # cannot pass the secret selectively. Safe: a root that does not declare `admin_cidr`
+      # silently ignores its TF_VAR_ (unlike -var, which errors, or .tfvars, which warns).
+      tf-vars: admin_cidr=${{ secrets.ADMIN_CIDR }}

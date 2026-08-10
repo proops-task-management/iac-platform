@@ -2,10 +2,28 @@
 # All keys have sensible defaults in variables.tf, so an EMPTY terraform.tfvars
 # is valid for D9/D10 (admin_cidr auto-detects your public IP).
 
-# admin_cidr: leave UNSET to auto-detect your laptop's public IP (D9/D10).
-# Once the IaC pipeline applies from CI (D11), SET it to your /32 here (or via
-# the pipeline's TF_VAR_admin_cidr) so the SG opens 6443 to YOU, not the runner.
-# admin_cidr = "203.0.113.4/32"
+# --- admin_cidr: the /32 allowed on the k3s API (6443) ----------------------
+# SUNSET: this whole section is deleted by MIN-50 (private API via SSM
+# port-forward) — no public 6443 rule means no admin_cidr. IRD-016 §Sunset.
+# There are exactly two supported paths, and they do not interfere (MIN-58):
+#
+#   1. LOCAL apply (this file / your laptop)
+#      Leave it UNSET to auto-detect your public IP via checkip.amazonaws.com —
+#      the right default for a dynamic home IP, since it self-heals on every apply.
+#      Or pin it below if you are behind a stable address.
+#      # admin_cidr = "203.0.113.4/32"
+#
+#   2. CI apply (the iac-* pipelines)
+#      Nothing goes here — this file is gitignored, so CI never sees it. The
+#      workflows pass the repo secret ADMIN_CIDR to reusable-iac@v6 as
+#      `tf-vars: admin_cidr=...`, which exports TF_VAR_admin_cidr:
+#        gh secret set ADMIN_CIDR --repo proops-task-management/iac-platform \
+#          --body "$(curl -s https://checkip.amazonaws.com)/32"
+#      A `guard-tfvars` job fails the run RED if that secret is missing, so CI can
+#      never silently fall back to auto-detect and bind 6443 to the runner's IP.
+#
+# Precedence: an explicit value (here or TF_VAR_admin_cidr) wins and the
+# checkip lookup is not performed at all (`count = var.admin_cidr == null ? 1 : 0`).
 
 # instance_type    = "t3.medium"    # amd64 (x86_64), 2 vCPU / 4 GiB — MUST stay amd64 (ADR-015)
 # root_volume_gb   = 20
