@@ -1,11 +1,26 @@
 # .pre-commit-config.yaml — iac-platform
-# Local pre-commit gate (mirrors cicd-platform's). Lints YAML + Ansible + workflow syntax
-# and blocks committed secrets before they reach CI or history. Install once:
+# Local pre-commit gate (mirrors cicd-platform's). Lints YAML + Ansible + workflow syntax +
+# shell scripts, and blocks committed secrets before they reach CI or history. Install once:
 #   pre-commit install          # then hooks run on every `git commit`
 #   pre-commit run --all-files  # one-off full sweep
 # Pre-commit fetches each tool into its OWN managed venv — nothing is installed on your PATH,
-# and the operator ansible .venv is never touched. Pairs with the in-CI ansible-lint/yamllint
-# gate (iac-pr-opened.yml, MIN-52) — same tools + pins, earlier catch.
+# and the operator ansible .venv is never touched.
+#
+# CI PARITY — stated per tool, not as a blanket claim (MIN-60). This file used to say
+# "same tools + pins" as the in-CI gate; that was FALSE for actionlint (added to CI 2026-07-28)
+# and for shellcheck (which existed in neither place). A parity claim nobody can check is the
+# same defect class as a safeguard nothing forces to run — so the truth is tabulated:
+#
+#   hook          | in-CI counterpart (iac-pr-opened.yml)      | pinned in lockstep?
+#   --------------|--------------------------------------------|--------------------
+#   yamllint      | ansible-lint job + workflow-lint job        | yes — 1.35.1
+#   ansible-lint  | ansible-lint job (ansible-core 2.17.5)      | yes — 24.10.0
+#   actionlint    | workflow-lint job                           | yes — 1.7.1
+#   shellcheck    | script-lint job                             | yes — 0.10.0
+#   brace-guard   | script-lint job (same script, not a pin)    | structural
+#   gitleaks      | NONE — local hook only                      | n/a  <-- gap, see MIN-62
+#
+# Bumping any pin here MUST bump the CI counterpart in the same commit (the TSG-020 lesson).
 repos:
   - repo: https://github.com/gitleaks/gitleaks
     rev: v8.18.4
@@ -31,3 +46,37 @@ repos:
     rev: v1.7.1
     hooks:
       - id: actionlint             # validate .github/workflows/*.yml syntax + expressions
+
+  # MIN-60 / TSG-028 — the daily-ops bash suite (scripts/*.sh) previously had NO lint gate.
+  # actionlint shellchecks `run:` blocks, but only INSIDE workflow files; standalone .sh got
+  # nothing, so `task check` was green while cluster-up.sh carried a fatal expansion bug.
+  #
+  # WHY shellcheck-py AND NOT koalaman/shellcheck-precommit: the koalaman hook is
+  # `language: docker_image` — it needs a running Docker daemon, which would make the local
+  # gate fail on a laptop with Docker Desktop closed and contradicts this file's own promise
+  # that every tool lives in a pre-commit-managed env and nothing lands on your PATH.
+  # shellcheck-py ships the SAME upstream binary via pip, matching the yamllint/ansible-lint
+  # pattern already used here. rev v0.10.0.1 == shellcheck 0.10.0 — the version the CI
+  # script-lint job downloads (lockstep; keep the two in sync when bumping).
+  - repo: https://github.com/shellcheck-py/shellcheck-py
+    rev: v0.10.0.1
+    hooks:
+      - id: shellcheck             # lint scripts/*.sh (severity: style — full strictness)
+
+  # MIN-60 AC-4 — the check shellcheck CANNOT do, so it is not delegated to prose.
+  # Probing shellcheck 0.10.0 with TSG-028's exact line (`$PUBLIC_IP` + U+2026) returned a
+  # CLEAN PASS: it parses Unicode text, while bash resolves identifiers byte-wise and folds
+  # the ellipsis's leading 0xE2 into the name. So the shellcheck hook above does NOT cover
+  # the defect that created this issue. Writing the brace rule into IRD-014 and stopping
+  # there would have been MIN-58's mistake again — a rule with nothing behind it.
+  #
+  # `repo: local` is deliberate: this hook and the `script-lint` CI job exec the SAME
+  # scripts/lint-brace-guard.sh, so the two cannot drift. Lockstep here is structural (one
+  # file) rather than two version pins someone must remember to bump together.
+  - repo: local
+    hooks:
+      - id: brace-guard
+        name: brace-guard (TSG-028 — unbraced $VAR next to non-ASCII)
+        entry: scripts/lint-brace-guard.sh
+        language: script
+        types: [shell]

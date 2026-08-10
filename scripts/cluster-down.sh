@@ -23,17 +23,24 @@ die()  { printf '\033[1;31m[down] ERROR:\033[0m %s\n' "$*" >&2; exit 1; }
 command -v aws >/dev/null || die "aws CLI not found"
 
 # Discover instances by tag (same as cluster-up).
-IDS="$(aws ec2 describe-instances --region "$REGION" \
+# Read into an ARRAY, not a space-joined string. `aws --output text` separates with TABs, so
+# `--instance-ids $IDS` (unquoted, SC2086) only worked because bash word-splits on the default
+# IFS — an assumption that broke on a hand-run variant during the Phase-3 window (MIN-60).
+# Normalise tabs to newlines and split once, here. Indexed arrays only (macOS bash 3.2).
+IDS=()
+while IFS= read -r id; do
+  if [[ -n "$id" ]]; then IDS+=("$id"); fi
+done < <(aws ec2 describe-instances --region "$REGION" \
   --filters "Name=tag:Project,Values=$PROJECT" "Name=tag:Role,Values=k3s-server,k3s-agent" \
             "Name=instance-state-name,Values=pending,running,stopping,stopped" \
-  --query 'Reservations[].Instances[].InstanceId' --output text)"
-[[ -n "$IDS" ]] || die "no k3s instances found by tag"
-NODE_COUNT="$(wc -w <<<"$IDS" | tr -d ' ')"
+  --query 'Reservations[].Instances[].InstanceId' --output text | tr '\t' '\n')
+NODE_COUNT="${#IDS[@]}"
+[[ "$NODE_COUNT" -gt 0 ]] || die "no k3s instances found by tag"
 
 # Stop (idempotent: stop on an already-stopped instance is a no-op).
-log "stopping: $IDS"
-aws ec2 stop-instances --region "$REGION" --instance-ids $IDS >/dev/null
-aws ec2 wait instance-stopped --region "$REGION" --instance-ids $IDS
+log "stopping: ${IDS[*]}"
+aws ec2 stop-instances --region "$REGION" --instance-ids "${IDS[@]}" >/dev/null
+aws ec2 wait instance-stopped --region "$REGION" --instance-ids "${IDS[@]}"
 log "stopped $NODE_COUNT instance(s)."
 
 # Cost estimate for today's session (compute only; excludes EBS/data transfer).

@@ -36,8 +36,15 @@ trap cleanup EXIT
 
 # --- Load operator-supplied inputs (optional overrides) ----------------------
 if [[ -f "$SECRETS_FILE" ]]; then
+  set -a
+  # SECRETS_FILE is an operator-supplied runtime path, so shellcheck cannot follow it to
+  # verify what it defines; the [[ -f ]] guard above already proves it exists. The directive
+  # must sit immediately above `source` and `source` must be its own statement — it was
+  # previously above `set -a; source ...; set +a`, where it bound to `set -a` and suppressed
+  # nothing at all. Nobody could see that, because no gate ran shellcheck (MIN-60).
   # shellcheck disable=SC1090
-  set -a; source "$SECRETS_FILE"; set +a
+  source "$SECRETS_FILE"
+  set +a
   echo "Loaded inputs from $SECRETS_FILE"
 else
   echo "No $SECRETS_FILE found — generating all passwords, skipping externally-supplied secrets."
@@ -47,7 +54,7 @@ gen_pw() { openssl rand -base64 24; }
 
 # Write a value to a temp file (never echoed) and return its path.
 val_file() {
-  local name="$1" value="$2" f="$WORKDIR/$1"
+  local value="$2" f="$WORKDIR/$1"   # no `name` local — $1 is used directly (was dead, SC2034)
   printf '%s' "$value" > "$f"
   chmod 600 "$f"
   printf '%s' "$f"
