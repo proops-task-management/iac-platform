@@ -60,6 +60,36 @@ jobs:
             workflows:
               - '.github/workflows/**'
 
+  # SUNSET: this job + every `tf-vars:` block below is deleted by MIN-50 (private k3s
+  # API via SSM port-forward) — no public 6443 rule means no admin_cidr to protect.
+  # MIN-58 is a deliberate BRIDGE to unblock the Phase-3 gate. See IRD-016 §Sunset.
+  #
+  # MIN-58 — the pinned admin_cidr must actually EXIST before any k3s-dev terraform runs.
+  # Without it `var.admin_cidr` is null, `envs/k3s-dev` falls back to auto-detecting the
+  # runner's public IP, and the 6443 SG rule silently drifts to a throwaway address:
+  # on `plan` that is a phantom diff on every PR forever, on `apply` it locks the operator
+  # out of kubectl. FAILS RED on purpose — unlike `guard-k3s-dev` (a destroyed cluster is a
+  # designed steady state, so it warns), a missing pin is a MISCONFIGURATION and must stop
+  # the line. The whole point of MIN-58 is that a safeguard nothing forces to run is not a
+  # safeguard; a fix that silently self-disables would repeat the same mistake.
+  guard-tfvars:
+    needs: changes
+    if: needs.changes.outputs.k3s_dev == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: ADMIN_CIDR secret must be set
+        env:
+          ADMIN_CIDR: ${{ secrets.ADMIN_CIDR }}
+        run: |
+          set -euo pipefail
+          if [ -z "${ADMIN_CIDR:-}" ]; then
+            echo "::error::ADMIN_CIDR secret is not set. envs/k3s-dev would auto-detect the RUNNER's public IP for the 6443 security-group rule (MIN-58). Set it with: gh secret set ADMIN_CIDR --repo proops-task-management/iac-platform --body '<your-ip>/32'"
+            exit 1
+          fi
+          echo "ADMIN_CIDR is set — TF_VAR_admin_cidr will pin the 6443 rule to the operator /32."
+
   plan-global:
     needs: changes
     if: needs.changes.outputs.global == 'true'
@@ -72,9 +102,14 @@ jobs:
       action: plan
       working-directory: envs/global
       aws-role-arn: arn:aws:iam::${{ vars.AWS_ACCOUNT_ID }}:role/gha-iac-plan
+    secrets:
+      # Passed to EVERY root uniformly: a root that does not declare `admin_cidr` silently
+      # ignores its TF_VAR_ (unlike -var, which errors, or .tfvars, which warns). The caller
+      # owns the variable NAME; the secret holds only the value (MIN-58).
+      tf-vars: admin_cidr=${{ secrets.ADMIN_CIDR }}
 
   plan-k3s-dev:
-    needs: changes
+    needs: [changes, guard-tfvars]
     if: needs.changes.outputs.k3s_dev == 'true'
     permissions:
       id-token: write
@@ -85,6 +120,10 @@ jobs:
       action: plan
       working-directory: envs/k3s-dev
       aws-role-arn: arn:aws:iam::${{ vars.AWS_ACCOUNT_ID }}:role/gha-iac-plan
+    secrets:
+      # This is the root that actually consumes it — pinning `admin_cidr` here is what
+      # removes the never-converging `<operator>/32 -> <runner>/32` diff from every PR plan.
+      tf-vars: admin_cidr=${{ secrets.ADMIN_CIDR }}
 
   # MIN-52 — Ansible lint gate on a pinned control-node toolchain (TSG-020). No AWS, no cluster.
   ansible-lint:

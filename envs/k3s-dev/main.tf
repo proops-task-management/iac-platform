@@ -15,11 +15,29 @@
 # ===========================================================================
 
 # --- admin_cidr: hybrid (explicit var OR auto-detected public IP) -----------
+# ⏳ SUNSET — this entire block is deleted by MIN-50 (private k3s API via SSM
+# port-forward). Once there is no public 6443 ingress rule there is no
+# `admin_cidr` to get wrong: the data source, the local, the variable, the
+# ADMIN_CIDR secret, the `tf-vars` pass-through in all 5 call-sites and the
+# `guard-tfvars` jobs all go with it. MIN-58 is a BRIDGE, deliberately — it
+# unblocks the Phase-3 gate that MIN-50 is too large and too access-path-risky
+# to sit in front of. Full teardown list: IRD-016 §Sunset.
 # checkip.amazonaws.com returns the egress IP AWS actually sees (more reliable
-# than third-party services under CGNAT). Used only when var.admin_cidr is null.
-# WARNING: auto-detect binds the SG to whoever runs `apply` — correct for
-# laptop applies (D9/D10); at D11 the CI runner applies, so pin admin_cidr in
-# the pipeline's TF_VAR_admin_cidr to avoid locking yourself out (MIN-13).
+# than third-party services under CGNAT). Used only when var.admin_cidr is null,
+# so supplying the variable removes the lookup entirely rather than overriding it.
+#
+# Auto-detect binds the 6443 SG rule to WHOEVER RUNS apply. That is correct on a
+# laptop (self-heals when the ISP rotates your IP) and wrong from CI, where the
+# runner's IP is ephemeral: the apply locks the operator out of kubectl, and the
+# plan shows an `<operator>/32 -> <runner>/32` diff that never converges.
+#
+# BOTH PATHS ARE NOW WIRED (MIN-58, was a bare TODO here from D9 to D11):
+#   * local  — leave var.admin_cidr null (auto-detect) or set it in terraform.tfvars
+#   * CI     — the iac-* workflows pass the ADMIN_CIDR repo secret to reusable-iac@v6
+#              as `tf-vars: admin_cidr=...`, which exports TF_VAR_admin_cidr.
+#              A `guard-tfvars` job FAILS RED if that secret is missing, so the
+#              auto-detect fallback can never silently return in CI.
+# Contract: IRD-015 §reusable-iac.yml (tf-vars) + IRD-016 §IaC pipelines.
 data "http" "myip" {
   count = var.admin_cidr == null ? 1 : 0
   url   = "https://checkip.amazonaws.com"
