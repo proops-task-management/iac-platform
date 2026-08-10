@@ -12,6 +12,13 @@
 # that is a stopped -> running script and hard-fails against empty state.
 # So after a `terraform destroy`, expect your merged change to sit UNAPPLIED
 # until the next window — that is by design (MIN-56 / TSG-026), not a failure.
+#
+# Conversely: the `changes` paths-filter keys on FILE PATHS, not on plan content.
+# A comment-only edit to this file therefore still triggers the full
+# plan -> guard-tfvars -> guard-k3s-dev -> apply chain, with a zero-diff plan.
+# That is deliberate and useful: it is how the pipeline is exercised end-to-end
+# against a live cluster without changing any infrastructure (MIN-15, MIN-56 AC-2,
+# MIN-58 AC-4/AC-5 were all proven this way, in one merge, at a metered window).
 # ===========================================================================
 
 # --- admin_cidr: hybrid (explicit var OR auto-detected public IP) -----------
