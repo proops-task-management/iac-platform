@@ -25,7 +25,7 @@ tasks:
       - pre-commit install
 
   lint:
-    desc: Run all pre-commit hooks against every file (gitleaks + yamllint + ansible-lint + actionlint)
+    desc: All pre-commit hooks (gitleaks + yamllint + ansible-lint + actionlint + shellcheck + brace-guard)
     cmds:
       - pre-commit run --all-files
 
@@ -43,6 +43,16 @@ tasks:
     desc: Lint the Ansible layer only (uses .ansible-lint; pinned ansible-core 2.17.5 per TSG-020)
     cmds:
       - pre-commit run ansible-lint --all-files
+
+  shellcheck:
+    desc: Lint the daily-ops bash suite only (scripts/*.sh — pinned shellcheck 0.10.0, MIN-60)
+    cmds:
+      - pre-commit run shellcheck --all-files
+
+  brace-guard:
+    desc: Check for unbraced $VAR next to a non-ASCII char — the TSG-028 bug shellcheck can't see
+    cmds:
+      - pre-commit run brace-guard --all-files
 
   secrets:
     desc: Scan for committed secrets only (gitleaks)

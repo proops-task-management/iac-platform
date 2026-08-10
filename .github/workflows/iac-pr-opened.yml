@@ -14,6 +14,10 @@ on:
       - "envs/**"
       - "modules/**"
       - "ansible/**"
+      # The daily-ops bash suite. Without this line a PR touching ONLY scripts/ would not
+      # start this workflow at all, so the shellcheck job below could never run — a gate
+      # wired to a trigger that never fires is not a gate (MIN-60).
+      - "scripts/**"
       # ALL workflows, not just this one. Previously only `iac-pr-opened.yml` self-triggered,
       # so a change to iac-pr-merged / iac-manual / review-plan / why-failed reached `main`
       # with NO CI lint at all — including `guard-k3s-dev`, the cost control (MIN-56).
@@ -35,6 +39,7 @@ jobs:
       k3s_dev: ${{ steps.filter.outputs.k3s_dev }}
       ansible: ${{ steps.filter.outputs.ansible }}
       workflows: ${{ steps.filter.outputs.workflows }}
+      scripts: ${{ steps.filter.outputs.scripts }}
     steps:
       - uses: actions/checkout@v4
       - uses: dorny/paths-filter@v3
@@ -59,6 +64,8 @@ jobs:
               - 'ansible/**'
             workflows:
               - '.github/workflows/**'
+            scripts:
+              - 'scripts/**'
 
   # SUNSET: this job + every `tf-vars:` block below is deleted by MIN-50 (private k3s
   # API via SSM port-forward) — no public 6443 rule means no admin_cidr to protect.
@@ -181,3 +188,51 @@ jobs:
           set -euo pipefail
           pip install "yamllint==1.35.1"
           yamllint -c .yamllint.yaml .github/workflows/
+
+  # MIN-60 / TSG-028 — shellcheck for STANDALONE .sh files. `workflow-lint` above runs actionlint,
+  # which DOES shellcheck `run:` blocks — but only inside workflow files. scripts/ got nothing, so
+  # the daily-ops bash suite (the one layer with its own standards doc, IRD-014) was the only
+  # unguarded layer in the repo: `task check` was green while cluster-up.sh carried a fatal
+  # expansion bug that could surface only at runtime, with the AWS meter running.
+  # Pinned to the SAME shellcheck the local hook uses — .pre-commit-config.yaml's
+  # shellcheck-py rev v0.10.0.1 IS shellcheck 0.10.0 — so local and CI can never disagree
+  # (the TSG-020 lesson). Bump both in one commit or not at all.
+  script-lint:
+    needs: changes
+    if: needs.changes.outputs.scripts == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install pinned shellcheck
+        env:
+          SHELLCHECK_VERSION: "0.10.0"   # keep in lockstep with .pre-commit-config.yaml
+        run: |
+          set -euo pipefail
+          curl -fsSL -o shellcheck.tar.xz \
+            "https://github.com/koalaman/shellcheck/releases/download/v${SHELLCHECK_VERSION}/shellcheck-v${SHELLCHECK_VERSION}.linux.x86_64.tar.xz"
+          tar -xJf shellcheck.tar.xz "shellcheck-v${SHELLCHECK_VERSION}/shellcheck"
+          install -m 0755 "shellcheck-v${SHELLCHECK_VERSION}/shellcheck" /usr/local/bin/shellcheck
+          shellcheck --version
+      - name: shellcheck
+        run: |
+          set -euo pipefail
+          # Lint every TRACKED shell file, not a hardcoded scripts/*.sh glob — that is what the
+          # pre-commit hook does (`types: [shell]`), and the two must cover the same set or the
+          # lockstep above is only about the version, not about the scope.
+          mapfile -t SH_FILES < <(git ls-files '*.sh')
+          if [ ${#SH_FILES[@]} -eq 0 ]; then
+            echo "::error::scripts/** changed but no tracked *.sh found — check this filter"
+            exit 1
+          fi
+          printf 'linting %d file(s)\n' "${#SH_FILES[@]}"
+          shellcheck "${SH_FILES[@]}"
+
+      # The half shellcheck cannot do. shellcheck parses Unicode; bash resolves identifiers
+      # byte-wise, so `$PUBLIC_IP` + U+2026 reads clean to the linter and dies at runtime under
+      # `set -u` (TSG-028). Probed directly against 0.10.0 — clean pass. This is the SAME script
+      # the `brace-guard` pre-commit hook runs, so local and CI cannot disagree: there is one
+      # implementation, not two pinned copies (MIN-60 AC-4).
+      - name: brace-guard (TSG-028)
+        run: ./scripts/lint-brace-guard.sh

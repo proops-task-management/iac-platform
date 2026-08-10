@@ -46,21 +46,34 @@ ids_by_role() {
 SERVER_ID="$(ids_by_role k3s-server)"
 AGENT_ID="$(ids_by_role k3s-agent)"
 [[ -n "$SERVER_ID" && -n "$AGENT_ID" ]] || die "instances not found by tag — is envs/k3s-dev applied?"
-ALL_IDS="$SERVER_ID $AGENT_ID"
-log "server=$SERVER_ID agent=$AGENT_ID"
+
+# Collect the IDs into an ARRAY so every later use is "${ALL_IDS[@]}" — quoted, and never
+# re-split by whatever IFS (or shell) happens to be in effect. This was `ALL_IDS="$A $B"`
+# passed unquoted (SC2086, MIN-60): correct only because bash word-splits and IFS was
+# untouched. `aws --output text` actually separates with TABs, so a hand-run variant of this
+# same call died with InvalidInstanceId during the Phase-3 window — zsh does not word-split
+# unquoted expansions at all, and the tab went through as part of one malformed value.
+# Splitting ONCE here, at the source, removes the assumption instead of relying on it.
+# Indexed arrays only: macOS ships bash 3.2 (no `mapfile`, no `declare -A`).
+ALL_IDS=()
+while IFS= read -r id; do
+  if [[ -n "$id" ]]; then ALL_IDS+=("$id"); fi
+done < <(printf '%s\n%s\n' "$SERVER_ID" "$AGENT_ID" | tr '\t' '\n')
+[[ ${#ALL_IDS[@]} -ge 2 ]] || die "expected >= 2 instance IDs, got ${#ALL_IDS[@]}"
+log "server=$SERVER_ID agent=$AGENT_ID (${#ALL_IDS[@]} instances)"
 
 # 2) Start (idempotent: start on a running instance is a no-op).
 mkdir -p "$ARTIFACTS"
 log "starting instances…"
-aws ec2 start-instances --region "$REGION" --instance-ids $ALL_IDS >/dev/null
+aws ec2 start-instances --region "$REGION" --instance-ids "${ALL_IDS[@]}" >/dev/null
 date +%s > "$ARTIFACTS/last-up-epoch"     # cost marker for cluster-down.sh
-aws ec2 wait instance-running --region "$REGION" --instance-ids $ALL_IDS
+aws ec2 wait instance-running --region "$REGION" --instance-ids "${ALL_IDS[@]}"
 
 # 3) Wait for the SSM agent to report Online (no SSH — SSM is the transport).
 # 60×5s = 300s: a cold first boot (right after apply, cloud-init + dnf still running)
 # registers slower than a warm stop→start; 180s was too tight on a fresh rebuild (TSG-022).
 log "waiting for SSM online…"
-for id in $ALL_IDS; do
+for id in "${ALL_IDS[@]}"; do
   status=""
   for _ in $(seq 1 60); do
     status="$(aws ssm describe-instance-information --region "$REGION" \
