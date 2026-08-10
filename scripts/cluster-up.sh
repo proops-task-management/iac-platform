@@ -70,20 +70,56 @@ date +%s > "$ARTIFACTS/last-up-epoch"     # cost marker for cluster-down.sh
 aws ec2 wait instance-running --region "$REGION" --instance-ids "${ALL_IDS[@]}"
 
 # 3) Wait for the SSM agent to report Online (no SSH — SSM is the transport).
-# 60×5s = 300s: a cold first boot (right after apply, cloud-init + dnf still running)
-# registers slower than a warm stop→start; 180s was too tight on a fresh rebuild (TSG-022).
-log "waiting for SSM online…"
-for id in "${ALL_IDS[@]}"; do
-  status=""
-  for _ in $(seq 1 60); do
-    status="$(aws ssm describe-instance-information --region "$REGION" \
-      --filters "Key=InstanceIds,Values=$id" \
-      --query 'InstanceInformationList[0].PingStatus' --output text 2>/dev/null || true)"
-    [[ "$status" == "Online" ]] && break
-    sleep 5
-  done
-  [[ "$status" == "Online" ]] || die "SSM never came Online for $id"
+#
+# ADAPTIVE GATE (MIN-61 / ADR-016). This was `for _ in $(seq 1 60)` = a fixed 300s budget PER NODE,
+# and it lost a race with a cold boot in 3 of TSG-022's 4 occurrences — twice with a window that had
+# just been widened after the previous loss. Widening is not the fix: the pre-wait loop finally
+# MEASURED the range at **1555s cold vs 17s warm on the same two nodes (~90x)**. No constant serves
+# that. A first boot runs cloud-init + `dnf install python3` before the agent can even start its
+# handshake; a stop->start does none of it, so the distribution is bimodal by nature.
+#
+# Two changes, per ADR-016:
+#   * ONE wall-clock deadline for the WHOLE set, not a budget per node. The old form gave each node
+#     its own 300s, so node 2's clock did not start until node 1 was Online — a run could burn ~10
+#     minutes and still abort, and "is 300s enough?" was measured against the wrong number.
+#   * Report elapsed time on success. That is what produced the 1555/17 figures at all; it is
+#     instrumentation, not decoration. Deleting it removes the only thing keeping the ceiling honest.
+#
+# The InstanceIds filter is load-bearing: `describe-instance-information` retains rows for
+# TERMINATED instances, so an unfiltered check passes in seconds against yesterday's destroyed
+# cluster (it did, 2026-07-29). Values= takes the current IDs, comma-joined.
+SSM_DEADLINE_S="${SSM_DEADLINE_S:-2400}"   # circuit breaker, NOT a prediction: 40min vs a worst
+                                           # observed 1555s. A ceiling ~15% over the single worst
+                                           # data point is just the next constant queued to lose.
+ssm_wait_start="$(date +%s)"
+ids_csv="$(IFS=,; echo "${ALL_IDS[*]}")"
+want="${#ALL_IDS[@]}"
+log "waiting for SSM online (${want} nodes, ceiling ${SSM_DEADLINE_S}s)…"
+online=0
+last_report=0
+while :; do
+  # One call for the whole set. `length(...)` counts only Online rows among the CURRENT ids.
+  online="$(aws ssm describe-instance-information --region "$REGION" \
+    --filters "Key=InstanceIds,Values=${ids_csv}" \
+    --query "length(InstanceInformationList[?PingStatus=='Online'])" \
+    --output text 2>/dev/null || echo 0)"
+  [[ "$online" =~ ^[0-9]+$ ]] || online=0
+  elapsed=$(( $(date +%s) - ssm_wait_start ))
+  [[ "$online" -ge "$want" ]] && break
+  if [[ "$elapsed" -ge "$SSM_DEADLINE_S" ]]; then
+    die "SSM: only ${online}/${want} nodes Online after ${elapsed}s (ids: ${ids_csv}). Check \
+'aws ssm describe-instance-information --filters Key=InstanceIds,Values=${ids_csv}'; a node stuck \
+with healthy 2/2 EC2 status checks can be re-triggered with 'aws ec2 reboot-instances' (TSG-022)."
+  fi
+  # Progress at least every 30s — a 20-minute cold boot must look like waiting, with a running
+  # clock, not like a hang. Without this the operator kills a healthy run.
+  if [[ $(( elapsed - last_report )) -ge 30 ]]; then
+    log "  …${online}/${want} Online after ${elapsed}s"
+    last_report="$elapsed"
+  fi
+  sleep 10
 done
+log "SSM online: ${want}/${want} in $(( $(date +%s) - ssm_wait_start ))s"
 
 # 4) Upsert Route 53 A records → the server's (new) public IP (the IP churns each start).
 #    THIS MUST RUN BEFORE THE PLAYBOOK (MIN-54). The kubeconfig the k3s-server role writes
@@ -115,6 +151,10 @@ aws route53 wait resource-record-sets-changed --id "$CHANGE_ID"
 # under `set -u` with `PUBLIC_IP\xe2: unbound variable`. Brace any expansion that abuts non-ASCII.
 log "waiting for ${API_HOST} to resolve → ${PUBLIC_IP}…"
 resolved=""
+# ADR-016 exemption, deliberate: this constant is DERIVED, not estimated — 120s is twice the 60s
+# record TTL set above, which is the actual quantity being waited out. That is the narrow case where
+# a fixed timeout is correct, and the ADR requires the derivation to be stated at the site. Do not
+# "harmonise" it with the adaptive gates: nothing here is racing a boot.
 for _ in $(seq 1 24); do                      # 24×5s = 120s > the 60s record TTL
   resolved="$(dig +short "$API_HOST" A | tail -n1)"
   [[ "$resolved" == "$PUBLIC_IP" ]] && break
@@ -128,18 +168,37 @@ done
 log "ansible-playbook site.yml…"
 ( cd "$ANSIBLE_DIR" && ansible-playbook site.yml )
 
-# 6) Readiness gate: 2 nodes Ready.
+# 6) Readiness gate: all nodes Ready. Adaptive, same contract as the SSM gate (ADR-016) — this was
+# a fixed `seq 1 30` (150s) with no derivation behind it. The agent's kubelet registers only after
+# k3s installs and the join succeeds, so on a cold boot this races the same slow first boot the SSM
+# gate does. Leaving one of two gates in the same file on a guessed constant, right after writing
+# the doctrine, is the failure mode this ADR exists to stop.
 export KUBECONFIG="$KUBECONFIG_ARTIFACT"
 [[ -f "$KUBECONFIG" ]] || die "kubeconfig artifact missing — did the server role run?"
-log "waiting for 2 nodes Ready…"
+NODES_DEADLINE_S="${NODES_DEADLINE_S:-600}"   # circuit breaker; Ansible has already converged here,
+                                              # so this is kubelet registration only — far shorter
+                                              # than the SSM gate's cold-boot window.
+nodes_wait_start="$(date +%s)"
+log "waiting for ${want} nodes Ready (ceiling ${NODES_DEADLINE_S}s)…"
 ready=0
-for _ in $(seq 1 30); do
+last_report=0
+while :; do
   ready="$(kubectl get nodes --no-headers 2>/dev/null | awk '$2=="Ready"' | wc -l | tr -d ' ')"
-  [[ "$ready" -ge 2 ]] && break
-  sleep 5
+  [[ "$ready" =~ ^[0-9]+$ ]] || ready=0
+  elapsed=$(( $(date +%s) - nodes_wait_start ))
+  [[ "$ready" -ge "$want" ]] && break
+  if [[ "$elapsed" -ge "$NODES_DEADLINE_S" ]]; then
+    kubectl get nodes || true               # show the real state before dying
+    die "only ${ready}/${want} nodes Ready after ${elapsed}s"
+  fi
+  if [[ $(( elapsed - last_report )) -ge 30 ]]; then
+    log "  …${ready}/${want} Ready after ${elapsed}s"
+    last_report="$elapsed"
+  fi
+  sleep 10
 done
+log "nodes Ready: ${ready}/${want} in $(( $(date +%s) - nodes_wait_start ))s"
 kubectl get nodes || die "kubectl get nodes failed"
-[[ "$ready" -ge 2 ]] || die "only $ready/2 nodes Ready"
 
 ELAPSED=$(( $(date +%s) - START_TS ))
 log "UP in ${ELAPSED}s · Argo CD in ns 'platform' · endpoints: ${SUBDOMAINS[*]/%/.$DOMAIN}"
