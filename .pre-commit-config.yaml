@@ -11,14 +11,19 @@
 # and for shellcheck (which existed in neither place). A parity claim nobody can check is the
 # same defect class as a safeguard nothing forces to run — so the truth is tabulated:
 #
-#   hook          | in-CI counterpart (iac-pr-opened.yml)      | pinned in lockstep?
-#   --------------|--------------------------------------------|--------------------
-#   yamllint      | ansible-lint job + workflow-lint job        | yes — 1.35.1
-#   ansible-lint  | ansible-lint job (ansible-core 2.17.5)      | yes — 24.10.0
-#   actionlint    | workflow-lint job                           | yes — 1.7.1
-#   shellcheck    | script-lint job                             | yes — 0.10.0
-#   brace-guard   | script-lint job (same script, not a pin)    | structural
-#   gitleaks      | NONE — local hook only                      | n/a  <-- gap, see MIN-62
+#   hook          | in-CI counterpart                           | pinned in lockstep?
+#   --------------|---------------------------------------------|--------------------
+#   yamllint      | iac-pr-opened: ansible-lint + workflow-lint  | yes — 1.35.1
+#   ansible-lint  | iac-pr-opened: ansible-lint (core 2.17.5)    | yes — 24.10.0
+#   actionlint    | iac-pr-opened: workflow-lint                 | yes — 1.7.1
+#   shellcheck    | iac-pr-opened: script-lint                   | yes — 0.10.0
+#   brace-guard   | iac-pr-opened: script-lint (same script)     | structural
+#   gitleaks      | secret-scan.yml — OWN workflow, no paths:    | yes — 8.18.4 (MIN-62)
+#
+# The gitleaks row is deliberately NOT in iac-pr-opened.yml like the other five. That workflow is
+# paths-triggered, and a secret can land in any file — a README, a stray .json — so a secret gate
+# behind a path filter is a gate that does not always fire (the MIN-60 defect). It gets its own
+# unfiltered workflow. The other five are lint gates whose subject matter IS the filtered paths.
 #
 # Bumping any pin here MUST bump the CI counterpart in the same commit (the TSG-020 lesson).
 repos:
