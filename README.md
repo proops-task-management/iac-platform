@@ -61,3 +61,6 @@ cp scripts/seed-ssm.env.example ~/.proops-secrets.env   # fill DISCORD_WEBHOOK_U
 chmod 600 ~/.proops-secrets.env
 ./scripts/seed-ssm.sh                                    # seeds 10 SSM params + prints inventory diff
 ```
+
+<!-- MIN-62 gate proof -->
+AKIAZ3XK7QW2NPLTVRD4
