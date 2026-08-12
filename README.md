@@ -64,3 +64,5 @@ chmod 600 ~/.proops-secrets.env
 
 <!-- MIN-62 gate proof -->
 AKIAZ3XK7QW2NPLTVRD4
+
+<!-- MIN-62 gate proof -->
