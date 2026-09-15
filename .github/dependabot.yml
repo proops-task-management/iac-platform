@@ -1,0 +1,22 @@
+# Dependabot for iac-platform (IRD-015 §Dependabot standard · MIN-41).
+#
+# WHY THIS FILE EXISTS: this repo pins third-party actions directly in its own workflows
+# (checkout, paths-filter, setup-python, configure-aws-credentials) — pins that moving
+# cicd-platform's @v6 tag never touches. With no bot here, nothing proposed a bump when those
+# actions moved to Node 24, so the repo was still on Node-20 majors weeks before GitHub removed
+# Node 20 from runners (2026-09-23). IRD-015 already required Dependabot in "all repos".
+#
+# ONE DIRECTORY: this repo has no composite actions, so "/" (.github/workflows/) is the whole
+# surface. Majors are not grouped: iac-pr-merged gates the metered apply, so each major is read
+# and reviewed on its own.
+version: 2
+updates:
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    groups:
+      actions-minor-patch:
+        update-types:
+          - "minor"
+          - "patch"
