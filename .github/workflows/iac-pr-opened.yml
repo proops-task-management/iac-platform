@@ -41,8 +41,8 @@ jobs:
       workflows: ${{ steps.filter.outputs.workflows }}
       scripts: ${{ steps.filter.outputs.scripts }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: dorny/paths-filter@v3
+      - uses: actions/checkout@v7
+      - uses: dorny/paths-filter@v4
         id: filter
         with:
           # Map each root to ONLY the modules it consumes (kept identical to iac-pr-merged so
@@ -140,8 +140,8 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
       - name: Install pinned control-node toolchain
@@ -170,7 +170,7 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Install pinned actionlint
         env:
           ACTIONLINT_VERSION: "1.7.1"   # keep in lockstep with .pre-commit-config.yaml
@@ -204,7 +204,7 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Install pinned shellcheck
         env:
           SHELLCHECK_VERSION: "0.10.0"   # keep in lockstep with .pre-commit-config.yaml
