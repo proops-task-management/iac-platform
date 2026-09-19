@@ -128,6 +128,14 @@ repos:
   # v0.53.0 lockstep with CI could not hold — the exact local/CI version skew TSG-020 was.
   # Any `docker_image` hook is rejected for the same reason koalaman's shellcheck was
   # (MIN-60): the gate would break whenever Docker Desktop is closed.
+  #
+  # `always_run: true` ON BOTH, NOT `files: \.tf$` — found while proving MIN-69 itself.
+  # pre-commit never hands DELETED files to a hook, so with a `files:` filter a commit whose
+  # only Terraform change is removing a .tf file SKIPPED both gates ("no files to check").
+  # That is exactly the change that breaks a root — delete the file that USES a variable and
+  # the declaration left behind is a tflint finding; delete the DECLARING file and `main.tf`
+  # dangles — and it is MIN-50's shape (retiring admin_cidr). Both hooks already scan whole
+  # roots (`pass_filenames: false`), so running every commit costs ~0.2 s and widens nothing.
   - repo: local
     hooks:
       # CHECK-ONLY, never rewrites (MIN-69 Q2): identical to CI's "Terraform fmt (check)",
@@ -146,7 +154,7 @@ repos:
         name: terraform fmt (check — same command as reusable-iac@v6)
         entry: terraform fmt -check -recursive -diff
         language: system
-        files: \.(tf|tfvars)$
+        always_run: true
         pass_filenames: false
 
       # `language: golang` builds tflint FROM SOURCE at the exact CI pin into pre-commit's
@@ -161,6 +169,6 @@ repos:
         language: golang
         additional_dependencies:
           - github.com/terraform-linters/tflint@v0.53.0   # lockstep: reusable-iac.yml tflint_version
-        files: (\.tf|\.tflint\.hcl)$
+        always_run: true
         pass_filenames: false
         verbose: true
