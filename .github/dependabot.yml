@@ -9,6 +9,12 @@
 # ONE DIRECTORY: this repo has no composite actions, so "/" (.github/workflows/) is the whole
 # surface. Majors are not grouped: iac-pr-merged gates the metered apply, so each major is read
 # and reviewed on its own.
+#
+# THE MINOR/PATCH GROUP IS LIVE SINCE MIN-65: the 10 third-party pins here are full commit SHAs
+# with a trailing `# vX.Y.Z` comment. Under the old @vN pins a minor or patch release never
+# produced a PR — the tag moved underneath us with no diff in this repo, which is also how a
+# REPOINTED tag would have arrived. Dependabot bumps the SHA and the version comment together,
+# so pinning keeps the upgrade signal instead of freezing it.
 version: 2
 updates:
   - package-ecosystem: "github-actions"
@@ -16,7 +22,7 @@ updates:
     schedule:
       interval: "weekly"
     groups:
-      actions-minor-patch:
+      all-minor-patch:
         update-types:
           - "minor"
           - "patch"
