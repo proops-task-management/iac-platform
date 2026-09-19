@@ -1,0 +1,42 @@
+name: action-pins
+
+# The supply-chain pin gate for this repo (IRD-015 §Rules · MIN-65). Third-party `uses:` must be
+# a full 40-char commit SHA plus a `# vX.Y.Z` comment; first-party
+# proops-task-management/cicd-platform/...@v6 refs are exempt (the moving tag IS the release
+# mechanism); `./` local refs are exempt.
+#
+# WHY IT MATTERS IN THIS REPO SPECIFICALLY: these pins run in the jobs that assume the
+# gha-iac-apply OIDC role (scoped admin on the AWS account) and the read-only gha-iac-plan role.
+# A tag is mutable, so an unpinned ref is new code executing with those credentials and NO diff
+# here — the tj-actions/changed-files (CVE-2025-30066) and trivy-action (GHSA-69fq-xp46-6x23)
+# shape exactly.
+#
+# WHY ITS OWN WORKFLOW AND NOT A JOB IN iac-pr-opened.yml: that workflow is paths-triggered.
+# Today every `uses:` here lives under .github/workflows/**, which the filter happens to cover —
+# but a composite action added later under .github/actions/** would silently escape it. A gate
+# whose correctness depends on a filter staying in sync with where code lives is the MIN-60
+# defect waiting to happen. Same reasoning, same shape as secret-scan.yml (MIN-62).
+#
+# WHY THE SCRIPT IS NOT COPIED HERE: the implementation lives once, in cicd-platform's
+# check-action-pins composite action, consumed here at @v6 and by cicd-platform's own self-ci at
+# ./ — plus the pre-commit hook in both repos via cicd-platform's .pre-commit-hooks.yaml. Four
+# call sites, one file. Copying it would create the very drift MIN-65 exists to prevent.
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  group: action-pins-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  action-pins:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Check action pins (MIN-65)
+        uses: proops-task-management/cicd-platform/.github/actions/check-action-pins@v6

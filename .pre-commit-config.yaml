@@ -19,6 +19,8 @@
 #   shellcheck    | iac-pr-opened: script-lint                   | yes — 0.10.0
 #   brace-guard   | iac-pr-opened: script-lint (same script)     | structural
 #   gitleaks      | secret-scan.yml — OWN workflow, no paths:    | yes — 8.18.4 (MIN-62)
+#   check-action-pins | action-pins.yml — OWN workflow, no paths: | STRUCTURAL — one script, in
+#                     |                                          | cicd-platform (MIN-65)
 #
 # The gitleaks row is deliberately NOT in iac-pr-opened.yml like the other five. That workflow is
 # paths-triggered, and a secret can land in any file — a README, a stray .json — so a secret gate
@@ -51,6 +53,26 @@ repos:
     rev: v1.7.1
     hooks:
       - id: actionlint             # validate .github/workflows/*.yml syntax + expressions
+
+  # MIN-65 — the SUPPLY-CHAIN half of the workflow gate. actionlint checks SYNTAX, and
+  # `uses: actions/checkout@v7` is both valid YAML and a mutable reference: the publisher can
+  # repoint that tag and this repo's apply job — which assumes gha-iac-apply — runs new code
+  # with no diff here. Third-party `uses:` must therefore be a full commit SHA + `# vX.Y.Z`.
+  #
+  # NOT a local copy of the script. The implementation lives once in cicd-platform and is
+  # consumed here through ITS .pre-commit-hooks.yaml, so this hook, cicd-platform's own hook,
+  # its self-ci GATE 4 and this repo's action-pins.yml all exec ONE file — copying it would
+  # create exactly the drift MIN-65 exists to prevent.
+  #
+  # `rev:` IS AN IMMUTABLE TAG ON PURPOSE, unlike the @v6 the CI side consumes: pre-commit
+  # resolves a ref at install time and caches it, so a moving tag would leave every clone on
+  # whatever @v6 meant the day it was installed — a silent, per-machine version. Dependabot does
+  # not update pre-commit revs; bump this by hand when @v6 moves (same rule as the gitleaks
+  # version duplicated in cicd-platform's self-ci.yml).
+  - repo: https://github.com/proops-task-management/cicd-platform
+    rev: v6.7
+    hooks:
+      - id: check-action-pins      # third-party actions must be SHA-pinned + version-commented
 
   # MIN-60 / TSG-028 — the daily-ops bash suite (scripts/*.sh) previously had NO lint gate.
   # actionlint shellchecks `run:` blocks, but only INSIDE workflow files; standalone .sh got
