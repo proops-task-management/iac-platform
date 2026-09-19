@@ -41,3 +41,5 @@ module "cost_guardrails" {
   total_limit_usd   = var.total_limit_usd
   alert_email       = var.alert_email
 }
+
+# MIN-65: throwaway @v6 (v6.7) pin verification — this PR is closed unmerged
