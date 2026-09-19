@@ -25,9 +25,14 @@ tasks:
       - pre-commit install
 
   lint:
-    desc: All pre-commit hooks (gitleaks + yamllint + ansible-lint + actionlint + shellcheck + brace-guard)
+    desc: All pre-commit hooks (gitleaks + yamllint + ansible-lint + actionlint + check-action-pins + shellcheck + brace-guard + terraform-fmt + tflint)
     cmds:
       - pre-commit run --all-files
+
+  tflint:
+    desc: TFLint on each Terraform root only (pinned v0.53.0 via pre-commit — same version + per-root scope as reusable-iac@v6, MIN-69)
+    cmds:
+      - pre-commit run tflint --all-files
 
   actionlint:
     desc: Validate GitHub Actions workflow syntax + expressions only
@@ -70,7 +75,7 @@ tasks:
       - terraform fmt -recursive
 
   fmt-check:
-    desc: Check Terraform formatting without editing — the same gate reusable-iac@v6 runs first
+    desc: Check Terraform formatting without editing — the same gate reusable-iac@v6 runs first (also the `terraform-fmt` hook)
     cmds:
       - terraform fmt -check -recursive
 
@@ -83,8 +88,11 @@ tasks:
           terraform -chdir={{.ITEM}} init -backend=false -input=false >/dev/null
           terraform -chdir={{.ITEM}} validate
 
+  # "Everything CI checks statically" was FALSE until MIN-69: CI also ran tflint, which no
+  # local task covered. It is true now because `lint` includes the tflint hook. If CI gains
+  # a static gate, this claim goes stale again unless a hook or task lands with it.
   check:
-    desc: Everything CI checks statically — fmt-check + validate + all pre-commit hooks
+    desc: Everything CI checks statically — fmt-check + validate + all pre-commit hooks (incl. tflint)
     cmds:
       - task: fmt-check
       - task: validate
