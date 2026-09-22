@@ -37,9 +37,16 @@
     wait_timeout: 300
 
 # --- Root app-of-apps: GATED off until the deploy repo exists (D12, Decision B) ---
-- name: Apply the root app-of-apps (only when enabled at D12)
+#
+# The definition is FETCHED from the `deploy` repo, never rendered here. Until
+# 2026-09-22 this role templated its own `root-app.yaml.j2`, so two different root
+# Applications existed under the same name/namespace — and the one this role applied
+# carried `path: bootstrap`, pointing the root app at the directory that contains it.
+# Neither file was wrong in isolation; having two was. `deploy` is the source of
+# truth for every Argo CD object (IRD-017, deploy/CLAUDE.md), including this one.
+- name: Apply the root app-of-apps from the deploy repo (only when enabled at D12)
   kubernetes.core.k8s:
     state: present
-    definition: "{{ lookup('template', 'root-app.yaml.j2') | from_yaml }}"
+    definition: "{{ lookup('url', deploy_root_app_url, split_lines=false) | from_yaml }}"
     kubeconfig: "{{ kubeconfig_local_path }}"
   when: argocd_bootstrap_root_app | bool
