@@ -3,6 +3,70 @@
 argocd_chart_ref:      argo-cd
 argocd_chart_repo_url: https://argoproj.github.io/argo-helm
 
+# Argo CD Helm values — IRD-017 §Bootstrap: "single replica, resource limits, no dex".
+# Until 2026-09-22 (D12) the install passed NO values, so none of the three held.
+argocd_helm_values:
+  dex:
+    enabled: false                  # no SSO at this stage; the admin account is the only login
+  configs:
+    cm:
+      # REQUIRED by every service overlay: they inflate charts/app via `helmCharts:`,
+      # which kustomize refuses without --enable-helm. Argo passes build options ONLY
+      # from here — there is no per-Application switch for this flag.
+      kustomize.buildOptions: --enable-helm
+  controller:
+    replicas: 1
+    resources:
+      requests:
+        cpu: 250m
+        memory: 512Mi
+      limits:
+        cpu: "1"
+        memory: 1Gi
+  server:
+    replicas: 1
+    resources:
+      requests:
+        cpu: 50m
+        memory: 128Mi
+      limits:
+        cpu: 500m
+        memory: 256Mi
+  repoServer:
+    replicas: 1
+    resources:                      # runs helm + kustomize renders — the memory-hungry one
+      requests:
+        cpu: 100m
+        memory: 256Mi
+      limits:
+        cpu: "1"
+        memory: 1Gi
+  applicationSet:
+    replicas: 1
+    resources:
+      requests:
+        cpu: 50m
+        memory: 64Mi
+      limits:
+        cpu: 250m
+        memory: 128Mi
+  notifications:
+    resources:
+      requests:
+        cpu: 50m
+        memory: 64Mi
+      limits:
+        cpu: 250m
+        memory: 128Mi
+  redis:
+    resources:
+      requests:
+        cpu: 50m
+        memory: 64Mi
+      limits:
+        cpu: 250m
+        memory: 128Mi
+
 # Root app-of-apps → the `deploy` repo. Finalized by IRD-017 at D12; GATED off
 # (group_vars: argocd_bootstrap_root_app: false) until that repo exists (Decision B).
 #

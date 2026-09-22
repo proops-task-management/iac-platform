@@ -18,6 +18,7 @@
     chart_ref: "{{ argocd_chart_ref }}"
     chart_repo_url: "{{ argocd_chart_repo_url }}"
     chart_version: "{{ argocd_chart_version }}"
+    values: "{{ argocd_helm_values }}"
     release_namespace: "{{ argocd_namespace }}"
     create_namespace: false
     kubeconfig: "{{ kubeconfig_local_path }}"
