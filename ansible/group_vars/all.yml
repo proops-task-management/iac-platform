@@ -29,7 +29,7 @@ k3s_tls_san_static:
 #     Verify chart version at https://github.com/argoproj/argo-helm before Step 3. ---
 argocd_namespace: platform
 argocd_chart_version: "7.7.10"
-argocd_bootstrap_root_app: false        # flip true at D12 when the `deploy` repo exists
+argocd_bootstrap_root_app: true         # flipped at D12, 2026-09-22 — the `deploy` repo exists
 
 # --- Local artifact (gitignored — P1-7). The fetched, URL-rewritten kubeconfig. ---
 kubeconfig_local_path: "{{ playbook_dir }}/.artifacts/kubeconfig"

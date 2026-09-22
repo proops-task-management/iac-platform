@@ -5,6 +5,14 @@ argocd_chart_repo_url: https://argoproj.github.io/argo-helm
 
 # Root app-of-apps → the `deploy` repo. Finalized by IRD-017 at D12; GATED off
 # (group_vars: argocd_bootstrap_root_app: false) until that repo exists (Decision B).
-deploy_repo_url:             https://github.com/proops-task-management/deploy.git
+#
+# This role does NOT render its own copy of the root Application (corrected at D12,
+# 2026-09-22). It fetches the ONE definition that lives in the `deploy` repo, over
+# plain HTTPS with no credential — which is the entire reason that repo is public
+# (IRD-017 §Bootstrap: "Argo needs no repo secret, so there is no secret to rotate,
+# leak or bootstrap before bootstrapping"). Fetching rather than reading a sibling
+# checkout means what gets applied is what is on `main`, never a stale local clone.
+deploy_repo_raw_base:        https://raw.githubusercontent.com/proops-task-management/deploy
 deploy_repo_target_revision: main
-deploy_repo_root_path:       bootstrap
+deploy_root_app_path:        bootstrap/root-app.yaml
+deploy_root_app_url:         "{{ deploy_repo_raw_base }}/{{ deploy_repo_target_revision }}/{{ deploy_root_app_path }}"
