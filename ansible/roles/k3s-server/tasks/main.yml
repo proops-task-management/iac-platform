@@ -9,13 +9,14 @@
     state: directory
     mode: "0755"
 
-# MIN-54: every SAN here is STABLE across a stop/start, so this template renders
-# byte-identical every morning → no `Restart k3s` → a true `changed=0` (AC-10-17).
-# The runtime PUBLIC IP is deliberately absent: it churns daily and was the sole
-# reason the config re-rendered. Reaching the API by name (k8s.<domain>, upserted by
-# cluster-up.sh) is what replaces it. The PRIVATE IP stays — the agent joins the
-# server node-to-node on it, and it survives a restart unchanged.
-- name: Render k3s server config (tls-san = stable names + private IP, no public IP)
+# Every SAN here is STABLE across a stop/start, so this template renders byte-identical
+# every morning → no `Restart k3s` → a true `changed=0` (AC-10-17, MIN-54).
+# MIN-50 / ADR-017: the API is reached through an SSM port-forward on 127.0.0.1, so the
+# SANs are 127.0.0.1 + the PRIVATE IP (the agent joins node-to-node on it). No public IP
+# (churns daily) and no domain name (a free domain must not gate cluster access).
+# Expect ONE `changed` + k3s restart on the first run after MIN-50 (SANs shrank); the
+# second run must be changed=0.
+- name: Render k3s server config (tls-san = 127.0.0.1 + private IP)
   ansible.builtin.template:
     src: config.yaml.j2
     dest: "{{ k3s_config_file }}"
@@ -93,17 +94,19 @@
   connection: local
   become: false
 
-- name: Write the URL-rewritten kubeconfig locally (127.0.0.1 → k8s.<domain>)
+- name: Write the kubeconfig locally (server → 127.0.0.1:<local port>, via the SSM tunnel)
   ansible.builtin.copy:
-    # The server URL must be reachable from the control node (not localhost-on-the-Mac)
-    # AND stable across a stop/start — hence the DNS name, not the churning public IP
-    # (MIN-54). The name is already a tls-san entry, so the cert check passes.
-    # PREREQUISITE: cluster-up.sh upserts k8s.<domain> → the new public IP BEFORE this
-    # play runs; otherwise Play 4 (argocd-bootstrap) would resolve yesterday's address.
+    # MIN-50 / ADR-017: on the control node, 127.0.0.1:<k3s_api_local_port> is the local end
+    # of scripts/k8s-tunnel.sh, which forwards to the node's 6443. k3s already writes
+    # https://127.0.0.1:6443, so at the default port this replace is a no-op; it stays so the
+    # local port can move off 6443 if something else on the Mac holds it. 127.0.0.1 is a
+    # tls-san entry, so the cert check passes.
+    # PREREQUISITE: the tunnel must be up before anything USES this file — cluster-up.sh
+    # runs `k8s-tunnel.sh ready` between `--tags nodes` and `--tags bootstrap`.
     content: >-
       {{ k3s_kubeconfig_b64.content | b64decode
          | replace('https://127.0.0.1:6443',
-                   'https://' ~ k3s_api_host ~ ':6443') }}
+                   'https://' ~ k3s_api_host ~ ':' ~ k3s_api_local_port) }}
     dest: "{{ kubeconfig_local_path }}"
     mode: "0600"
   delegate_to: localhost
