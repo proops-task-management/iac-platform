@@ -15,18 +15,8 @@ variable "region_code" {
   default     = "apse1"
 }
 
-variable "admin_cidr" {
-  type        = string
-  description = "Operator /32 (or CIDR) allowed to reach the k3s API on 6443. Never 0.0.0.0/0."
-
-  validation {
-    condition     = can(cidrhost(var.admin_cidr, 0))
-    error_message = "admin_cidr must be a valid CIDR, e.g. 203.0.113.4/32."
-  }
-}
-
 variable "api_port" {
   type        = number
-  description = "Kubernetes API server port exposed to admin_cidr only."
+  description = "k3s API/supervisor port, opened node-to-node (self) only — no public ingress (MIN-50 / ADR-017)."
   default     = 6443
 }

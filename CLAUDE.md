@@ -99,7 +99,10 @@ scripts/            daily-ops bash suite (IRD-014 standards)
 - Use local state — remote S3 backend is mandatory, one key per root.
 - Run `kubectl create secret` — Kubernetes Secrets exist only as ESO-materialized objects (IRD-019).
 - Open **port 22** or create an SSH key pair — management is SSM-only.
-- Open **6443** to `0.0.0.0/0` — only to `admin_cidr` (see MIN-50 for the production upgrade).
+- Open **6443** to ANY public source — the k3s API has no public ingress (MIN-50 / ADR-017). The
+  only 6443 rule is node-to-node (`self`). Operator `kubectl` goes through the SSM port-forward
+  (`scripts/k8s-tunnel.sh`). Break-glass = a temporary `iac-manual` SG rule, applied consciously
+  and reverted — never committed.
 - Put literal values in `main.tf` — all inputs come from `terraform.tfvars` (+ committed `.example`).
 - Use `force_destroy = true` on the backups bucket or any stateful resource without a `# why:` comment.
 - Hardcode the account id / region / thumbprints — derive from `data` sources.
@@ -119,7 +122,7 @@ scripts/            daily-ops bash suite (IRD-014 standards)
 | Config mgmt | Ansible (over `community.aws.aws_ssm`) | Install k3s + bootstrap Argo CD, no SSH |
 | Cluster | k3s (Traefik ON) on 2× `t3.medium` amd64 | amd64 to match CI's linux/amd64-only images (ADR-011/ADR-015) |
 | Secrets | SSM Parameter Store (SecureString) + ESO | Single source of truth; node-IAM auth |
-| Public-IP detect | `hashicorp/http` (checkip.amazonaws.com) | Hybrid `admin_cidr` on laptop applies |
+| k3s API access | SSM port-forward (`scripts/k8s-tunnel.sh`) | No public 6443; IAM-authenticated + CloudTrail-audited (ADR-017) |
 | Daily-ops | Bash (IRD-014 standards) | Idempotent, cost-printing, no orphans |
 | CI | GitHub Actions (thin callers of `reusable-iac.yml@v6`) | OIDC roles, no stored keys |
 
