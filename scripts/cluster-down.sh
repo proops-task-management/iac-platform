@@ -22,6 +22,16 @@ die()  { printf '\033[1;31m[down] ERROR:\033[0m %s\n' "$*" >&2; exit 1; }
 
 command -v aws >/dev/null || die "aws CLI not found"
 
+# Close the SSM tunnel to the k3s API FIRST (MIN-50): once the server stops, the session
+# dies upstream but the local listener + pid file would linger as an orphan that the next
+# `k8s-tunnel.sh up` must reconcile. Idempotent — a no-op when no tunnel is running.
+TUNNEL="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/k8s-tunnel.sh"
+if [[ -x "$TUNNEL" ]]; then
+  "$TUNNEL" down
+else
+  warn "$TUNNEL not executable — skipping tunnel cleanup"
+fi
+
 # Discover instances by tag (same as cluster-up).
 # Read into an ARRAY, not a space-joined string. `aws --output text` separates with TABs, so
 # `--instance-ids $IDS` (unquoted, SC2086) only worked because bash word-splits on the default

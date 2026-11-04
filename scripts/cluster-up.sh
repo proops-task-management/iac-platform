@@ -4,26 +4,30 @@
 # cluster with Argo CD, in one command (IRD-016 §daily-ops, IRD-014 standards).
 #
 # Sequence: discover instances by tag -> start -> wait SSM online ->
-# upsert Route 53 A records to the new public IP + wait for DNS -> ansible-playbook
-# site.yml (idempotent; fetches + rewrites kubeconfig) -> gate on 2 nodes Ready.
-# DNS BEFORE ANSIBLE is load-bearing (MIN-54): the kubeconfig targets k8s.<domain>, and
-# the same playbook run bootstraps Argo CD through it, so the name must already point at
-# today's IP. (Before MIN-54 the kubeconfig held the raw IP, so DNS could lag safely.)
+# upsert Route 53 A records (app ingress) -> ansible-playbook --tags nodes ->
+# SSM tunnel to the API + wait /readyz -> ansible-playbook --tags bootstrap (Argo CD)
+# -> gate on 2 nodes Ready.
+# THE TUNNEL BETWEEN THE TWO PLAYBOOK RUNS is load-bearing (MIN-50 / ADR-017): the k3s
+# API has no public ingress, the kubeconfig targets 127.0.0.1, and Play 4 bootstraps
+# Argo CD through it - so the tunnel must exist, and the API must answer through it,
+# before Play 4 starts. It can only be proven after Play 2 has installed k3s.
+# DNS is no longer on the API path at all (it was, MIN-54 → MIN-50): the A records
+# serve app ingress only, so nothing in this run waits for them to resolve.
 # Target: <= 5 minutes from stopped (AC-10-18). The AWS meter is running while up.
 #
 # Usage: ./scripts/cluster-up.sh
-#   Overrides: PROJECT, ENV, REGION, DOMAIN
+#   Overrides: PROJECT, ENV, REGION, DOMAIN (+ k8s-tunnel.sh's K3S_API_LOCAL_PORT etc.)
 # ===========================================================================
 set -euo pipefail
 
 PROJECT="${PROJECT:-proops-taskmgmt}"
 REGION="${REGION:-ap-southeast-1}"
 DOMAIN="${DOMAIN:-taskmgmt.dpdns.org}"
-# `k8s` is the control-plane endpoint the kubeconfig targets (MIN-54) — it must stay in
-# this list and must match `k3s_api_host` in ansible/group_vars/all.yml.
-SUBDOMAINS=(app api argocd grafana k8s)
-API_HOST="k8s.$DOMAIN"
-ANSIBLE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../ansible" && pwd)"
+# App-ingress names only. `k8s` was removed with MIN-50: the API is not served on a name.
+SUBDOMAINS=(app api argocd grafana)
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+TUNNEL="$SCRIPT_DIR/k8s-tunnel.sh"
+ANSIBLE_DIR="$(cd "$SCRIPT_DIR/../ansible" && pwd)"
 ARTIFACTS="$ANSIBLE_DIR/.artifacts"
 KUBECONFIG_ARTIFACT="$ARTIFACTS/kubeconfig"
 START_TS="$(date +%s)"
@@ -33,8 +37,11 @@ warn() { printf '\033[1;33m[up] WARN:\033[0m %s\n' "$*"; }
 die()  { printf '\033[1;31m[up] ERROR:\033[0m %s\n' "$*" >&2; exit 1; }
 
 command -v aws >/dev/null            || die "aws CLI not found"
-command -v dig >/dev/null            || die "dig not found (bind tools) — needed to confirm DNS before the playbook"
+command -v kubectl >/dev/null        || die "kubectl not found — needed for the API readiness + nodes-Ready gates"
+command -v session-manager-plugin >/dev/null \
+  || die "session-manager-plugin not found — the k3s API is reachable only through an SSM tunnel (MIN-50); TSG-021 covers the install path"
 command -v ansible-playbook >/dev/null || die "ansible-playbook not found (install collections: ansible-galaxy collection install -r ansible/requirements.yml)"
+[[ -x "$TUNNEL" ]]                   || die "$TUNNEL missing or not executable"
 
 # 1) Discover instance IDs by tag — same source of truth as the Ansible inventory.
 ids_by_role() {
@@ -122,10 +129,9 @@ done
 log "SSM online: ${want}/${want} in $(( $(date +%s) - ssm_wait_start ))s"
 
 # 4) Upsert Route 53 A records → the server's (new) public IP (the IP churns each start).
-#    THIS MUST RUN BEFORE THE PLAYBOOK (MIN-54). The kubeconfig the k3s-server role writes
-#    now targets k8s.<domain> instead of the raw IP, and Play 4 (argocd-bootstrap) uses that
-#    kubeconfig in the same run — so the name has to resolve to TODAY's address before
-#    Ansible starts, or the bootstrap would talk to yesterday's (dead) IP.
+#    These serve APP INGRESS only (Traefik 80/443). Since MIN-50 nothing in this run
+#    consumes them — the API goes through the SSM tunnel — so we wait for INSYNC (cheap,
+#    proves Route 53 accepted the change) but no longer for local resolution.
 PUBLIC_IP="$(aws ec2 describe-instances --region "$REGION" --instance-ids "$SERVER_ID" \
   --query 'Reservations[0].Instances[0].PublicIpAddress' --output text)"
 [[ -n "$PUBLIC_IP" && "$PUBLIC_IP" != "None" ]] || die "server has no public IP"
@@ -140,35 +146,28 @@ done
 CHANGE_ID="$(aws route53 change-resource-record-sets --hosted-zone-id "$ZONE_ID" \
   --change-batch "{\"Changes\":[${changes%,}]}" --query 'ChangeInfo.Id' --output text)"
 
-# Route 53 accepts the change before it is live on its nameservers — wait for INSYNC,
-# then confirm THIS host actually resolves the new address (the previous record's 60s
-# TTL can still be cached locally). Both waits are cheap and prevent a bootstrap that
-# fails on stale DNS — the exact failure the reordering above exists to avoid.
+# Route 53 accepts the change before it is live on its nameservers — wait for INSYNC.
+# (The 120s local-resolve gate that followed was removed with MIN-50: it existed only because
+# the same run used k8s.<domain> as the kubeconfig address. That dependency no longer exists.)
 log "waiting for the Route 53 change to be INSYNC…"
 aws route53 wait resource-record-sets-changed --id "$CHANGE_ID"
-# NOTE: braces are load-bearing here. `$PUBLIC_IP…` (unbraced, immediately followed by the
-# multi-byte ellipsis) made bash swallow the first byte of U+2026 into the identifier and abort
-# under `set -u` with `PUBLIC_IP\xe2: unbound variable`. Brace any expansion that abuts non-ASCII.
-log "waiting for ${API_HOST} to resolve → ${PUBLIC_IP}…"
-resolved=""
-# ADR-016 exemption, deliberate: this constant is DERIVED, not estimated — 120s is twice the 60s
-# record TTL set above, which is the actual quantity being waited out. That is the narrow case where
-# a fixed timeout is correct, and the ADR requires the derivation to be stated at the site. Do not
-# "harmonise" it with the adaptive gates: nothing here is racing a boot.
-for _ in $(seq 1 24); do                      # 24×5s = 120s > the 60s record TTL
-  resolved="$(dig +short "$API_HOST" A | tail -n1)"
-  [[ "$resolved" == "$PUBLIC_IP" ]] && break
-  sleep 5
-done
-[[ "$resolved" == "$PUBLIC_IP" ]] \
-  || die "$API_HOST still resolves to '${resolved:-nothing}' (want $PUBLIC_IP) — stale DNS cache; re-run in a minute"
 
-# 5) Configure the cluster (idempotent; the k3s-server role fetches + URL-rewrites
-#    the kubeconfig into $KUBECONFIG_ARTIFACT and bootstraps Argo CD).
-log "ansible-playbook site.yml…"
-( cd "$ANSIBLE_DIR" && ansible-playbook site.yml )
+# 5) Configure the nodes (Plays 1-3: OS baseline, k3s server, k3s agent). Idempotent; the
+#    k3s-server role writes the kubeconfig artifact targeting 127.0.0.1 (the tunnel's end).
+log "ansible-playbook site.yml --tags nodes…"
+( cd "$ANSIBLE_DIR" && ansible-playbook site.yml --tags nodes )
 
-# 6) Readiness gate: all nodes Ready. Adaptive, same contract as the SSM gate (ADR-016) — this was
+# 6) Open the SSM tunnel to the API and wait until the API answers THROUGH it (MIN-50).
+#    `ready` polls /readyz to a deadline (ADR-016) and re-establishes the session if SSM drops
+#    it — the first run after MIN-50 restarts k3s once (tls-san changed), which can do that.
+#    The tunnel is left running for the operator's kubectl; cluster-down.sh closes it.
+"$TUNNEL" ready
+
+# 7) Bootstrap Argo CD (Play 4, localhost) through the tunnel.
+log "ansible-playbook site.yml --tags bootstrap…"
+( cd "$ANSIBLE_DIR" && ansible-playbook site.yml --tags bootstrap )
+
+# 8) Readiness gate: all nodes Ready. Adaptive, same contract as the SSM gate (ADR-016) — this was
 # a fixed `seq 1 30` (150s) with no derivation behind it. The agent's kubelet registers only after
 # k3s installs and the join succeeds, so on a cold boot this races the same slow first boot the SSM
 # gate does. Leaving one of two gates in the same file on a guessed constant, right after writing
@@ -202,5 +201,6 @@ kubectl get nodes || die "kubectl get nodes failed"
 
 ELAPSED=$(( $(date +%s) - START_TS ))
 log "UP in ${ELAPSED}s · Argo CD in ns 'platform' · endpoints: ${SUBDOMAINS[*]/%/.$DOMAIN}"
-log "KUBECONFIG=$KUBECONFIG_ARTIFACT"
+log "KUBECONFIG=$KUBECONFIG_ARTIFACT (API via SSM tunnel on 127.0.0.1)"
+log "tunnel: $TUNNEL status — if kubectl stops answering (SSM closes idle sessions), run: $TUNNEL up"
 warn "meter is RUNNING — run ./scripts/cluster-down.sh at EOD."

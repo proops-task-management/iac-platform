@@ -1,9 +1,9 @@
 # Managed by Ansible (k3s-server role) — k3s reads this at /etc/rancher/k3s/config.yaml.
 # Server flags live HERE (templated), not in a long INSTALL_K3S_EXEC string (P1-5).
-# tls-san carries the STABLE DNS names (k8s.<domain>, <domain>, argocd.<domain>) + the
-# server's private IP, so kubectl/Argo over the named endpoint passes the cert SAN check
-# (P0-2b). The runtime PUBLIC IP is deliberately NOT a SAN (MIN-54): it changes on every
-# stop/start, which re-rendered this file daily and restarted k3s (DOP-010 AC-10-17).
+# tls-san carries 127.0.0.1 (the local end of the SSM port-forward, MIN-50 / ADR-017) + the
+# server's private IP (agent join). Both are stable across a stop/start, so this file renders
+# identically every morning (DOP-010 AC-10-17). The runtime PUBLIC IP is deliberately NOT a
+# SAN (MIN-54), and no domain name is either: the API is not served on a public name.
 # Traefik + servicelb stay ENABLED (IRD-016).
 write-kubeconfig-mode: "0644"
 tls-san:

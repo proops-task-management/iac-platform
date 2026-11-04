@@ -9,21 +9,22 @@ k3s_version: "v1.31.5+k3s1"
 k3s_token_ssm_path:     /proops/dev/k3s/token       # SecureString (P1-7)
 k3s_server_ip_ssm_path: /proops/dev/k3s/server-ip
 
-# --- Cluster identity / TLS (P0-2b, revised by MIN-54).
-#     The API endpoint is a STABLE DNS NAME, never the runtime public IP: the daily
-#     stop/start assigns a new public IP, so an IP-based tls-san re-rendered the server
-#     config every morning → the `Restart k3s` handler fired → `changed=3` forever
-#     (D10/MIN-14 idempotency caveat, DOP-010 AC-10-17). `cluster-up.sh` upserts
-#     k8s.<domain> → the new IP BEFORE the playbook runs, so the name is stable while
-#     the address behind it churns. Only the server's PRIVATE IP stays in tls-san — the
-#     agent joins node-to-node and private addressing does not change across a restart. ---
-cluster_domain: taskmgmt.dpdns.org
-k3s_api_host: "k8s.{{ cluster_domain }}"     # control-plane endpoint (kubeconfig + tls-san)
-# tls-san entries — all STATIC. The runtime public IP is deliberately NOT here (MIN-54).
+# --- Cluster identity / TLS (P0-2b → MIN-54 → MIN-50 / ADR-017).
+#     The k3s API is NOT reachable from the internet. Operator kubectl and the Play-4
+#     Argo CD bootstrap reach it through an SSM port-forward on 127.0.0.1
+#     (scripts/k8s-tunnel.sh), so the kubeconfig targets 127.0.0.1:<local port>.
+#     History, so it is not re-litigated: D10 used the raw public IP (churned daily →
+#     tls-san re-rendered → `Restart k3s` every morning); MIN-54 moved to k8s.<domain>
+#     (stable, but made a FREE domain load-bearing for kubectl - IRD-016 §Risk); MIN-50
+#     removes the public endpoint, so no name is needed at all.
+#     tls-san stays STATIC: 127.0.0.1 (explicit - k3s also adds it by default, but the
+#     tunnel depends on it, so it is stated rather than assumed) + the server's PRIVATE
+#     IP, appended by the role (the agent joins node-to-node on it). No domain names. ---
+cluster_domain: taskmgmt.dpdns.org             # app ingress only (Route 53 A records) - NOT the API
+k3s_api_host: 127.0.0.1                        # kubeconfig server address (via the SSM tunnel)
+k3s_api_local_port: 6443                       # must match K3S_API_LOCAL_PORT in scripts/k8s-tunnel.sh
 k3s_tls_san_static:
   - "{{ k3s_api_host }}"
-  - "{{ cluster_domain }}"
-  - "argocd.{{ cluster_domain }}"
 
 # --- Argo CD bootstrap (pinned chart; root app-of-apps GATED off until D12 — Decision B).
 #     Verify chart version at https://github.com/argoproj/argo-helm before Step 3. ---

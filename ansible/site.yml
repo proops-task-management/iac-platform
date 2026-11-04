@@ -9,12 +9,22 @@
 #   Play 4  argocd        → localhost/connection:local (NOT over SSM — P0-2)
 # Connection to the nodes = community.aws.aws_ssm (group_vars/k3s.yml). localhost
 # is not in group `k3s`, so Play 4 stays local.
+#
+# TWO TAGS, ONE GAP BETWEEN THEM (MIN-50 / ADR-017). The k3s API is private: Play 4
+# reaches it only through the SSM port-forward on 127.0.0.1, and that tunnel can only
+# be proven usable AFTER Play 2 has installed k3s. So cluster-up.sh runs:
+#   ansible-playbook site.yml --tags nodes        # Plays 1-3
+#   ./scripts/k8s-tunnel.sh ready                 # tunnel up + API /readyz
+#   ansible-playbook site.yml --tags bootstrap    # Play 4
+# An untagged full run still works IF the tunnel is already up (e.g. a re-run on a
+# live cluster); on a cold cluster Play 4 would fail to connect — use cluster-up.sh.
 # ===========================================================================
 
 - name: Baseline OS prep (all k3s nodes)
   hosts: k3s
   become: true
   gather_facts: true
+  tags: [nodes]
   roles:
     - os-baseline
 
@@ -23,6 +33,7 @@
   become: true
   gather_facts: true
   any_errors_fatal: true          # if the server fails, never attempt the agent
+  tags: [nodes]
   roles:
     - k3s-server
 
@@ -30,14 +41,16 @@
   hosts: k3s_agent
   become: true
   gather_facts: true
+  tags: [nodes]
   roles:
     - k3s-agent
 
-- name: Bootstrap Argo CD (control node — talks to the k8s API, not a node OS)
+- name: Bootstrap Argo CD (control node — talks to the k8s API through the SSM tunnel)
   hosts: localhost
   connection: local
   gather_facts: false
   become: false
+  tags: [bootstrap]
   # Load the shared vars EXPLICITLY (MIN-52 / TSG-020 class): implicit-localhost
   # group_vars/all scoping varies by ansible-core version, so a differently-pinned CI
   # runner could leave argocd_namespace/chart_version/kubeconfig_local_path undefined
