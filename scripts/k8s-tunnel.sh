@@ -11,7 +11,9 @@
 # Usage: ./scripts/k8s-tunnel.sh {up|down|status|ready}
 #   up      start the tunnel, or reuse a healthy one. Idempotent: safe to re-run,
 #           and the fix when an idle session has been closed by SSM.
-#   down    stop the tunnel and remove its pid file. Idempotent: no-op if none.
+#   down    end the SSM session server-side (TerminateSession, so CloudTrail records
+#           the end), then stop the local processes and remove the pid file.
+#           Idempotent: no-op when there is neither a local tunnel nor an open session.
 #   status  exit 0 only if OUR session holds the port AND the API answers /readyz.
 #   ready   `up`, then poll /readyz to a deadline (cluster-up.sh uses this between
 #           the node plays and the Argo CD bootstrap; k3s may still be restarting).
@@ -92,9 +94,45 @@ server_id() {
   echo "$ids"
 }
 
+# Marker appended to the log once a session has been terminated, so a second `down`
+# does not try to end the same session again. `up` truncates the log for each new session.
+TERMINATED_MARK="# k8s-tunnel.sh: terminated session"
+
+# SSM session id of the CURRENT log's session, if it has not been terminated yet.
+# The aws CLI prints "Starting session with SessionId: <id>" when the session opens.
+open_session_id() {
+  local id
+  [[ -f "$LOGFILE" ]] || return 0
+  id="$(sed -n 's/^Starting session with SessionId: \([A-Za-z0-9._-]*\).*$/\1/p' "$LOGFILE" | tail -n1)"
+  [[ -n "$id" ]] || return 0
+  grep -qF "${TERMINATED_MARK} ${id}" "$LOGFILE" && return 0
+  echo "$id"
+}
+
+# End the session on the AWS side. Killing the local CLI alone leaves the session
+# "Connected" until the idle timeout, and CloudTrail then shows a StartSession with no
+# TerminateSession (MIN-50 AC-5, found in the 2026-11-04 window). A failure here must
+# not block the local cleanup, but it must be visible (ADR-017: honest about failure).
+terminate_session() {
+  local id="$1"
+  if aws ssm terminate-session --region "$REGION" --session-id "$id" >/dev/null 2>&1; then
+    echo "${TERMINATED_MARK} ${id}" >>"$LOGFILE"
+    log "SSM session ${id} terminated server-side."
+  else
+    warn "could not terminate SSM session ${id} server-side (expired credentials?). It stays open until the Session Manager idle timeout. End it manually: aws ssm terminate-session --region ${REGION} --session-id ${id}"
+  fi
+}
+
 cmd_down() {
-  local pid
+  local pid sess
   pid="$(our_pid)"
+  sess="$(open_session_id)"
+  # Server side first, so the session ends cleanly instead of being orphaned by the kill.
+  # This also covers a laptop crash: no local process left, but the session still open.
+  if [[ -n "$sess" ]]; then
+    need aws "install the AWS CLI v2"
+    terminate_session "$sess"
+  fi
   if [[ -z "$pid" ]]; then
     rm -f "$PIDFILE"
     log "no tunnel running."
