@@ -1,8 +1,3 @@
-output "admin_cidr_effective" {
-  description = "The CIDR actually opened on 6443 (explicit var or auto-detected)."
-  value       = local.admin_cidr
-}
-
 output "sg_node_id" {
   description = "Node Security Group id."
   value       = module.network.sg_node_id
