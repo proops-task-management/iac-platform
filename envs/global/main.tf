@@ -41,3 +41,11 @@ module "cost_guardrails" {
   total_limit_usd   = var.total_limit_usd
   alert_email       = var.alert_email
 }
+
+# Session Manager preferences (MIN-83): account+region scoped, so it lives here, not in
+# k3s-dev. Raises the idle timeout that closes the operator's k3s API tunnel (ADR-017).
+module "session_manager_prefs" {
+  source = "../../modules/session-manager-prefs"
+
+  idle_session_timeout_minutes = var.ssm_idle_session_timeout_minutes
+}

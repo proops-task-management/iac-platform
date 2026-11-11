@@ -25,3 +25,8 @@
 # monthly_limit_usd     = 30
 # total_limit_usd       = 180
 # alert_email           = "tuanminh.dinh.work@gmail.com"
+
+# --- MIN-83: Session Manager preferences ---------------------------------------
+# Idle timeout (1-60 min) for every SSM session in this account+region, including
+# the k3s API tunnel. 60 = AWS maximum; without the document AWS uses 20.
+# ssm_idle_session_timeout_minutes = 60
