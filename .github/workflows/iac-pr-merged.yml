@@ -51,6 +51,7 @@ jobs:
               - 'modules/dns/**'
               - 'modules/storage/**'
               - 'modules/cost-guardrails/**'
+              - 'modules/session-manager-prefs/**'
             k3s_dev:
               - 'envs/k3s-dev/**'
               - 'modules/network/**'

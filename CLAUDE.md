@@ -54,6 +54,7 @@ modules/            reusable Terraform modules (named by CONCERN, not by primiti
   dns/              Route 53 hosted zone (zone only)                 [D9]
   storage/          db-backups + plan-artifacts S3 buckets           [D9]
   cost-guardrails/  AWS Budgets $30/mo + $180 total                  [D9]
+  session-manager-prefs/ SSM-SessionManagerRunShell (idle timeout 60) [MIN-83]
 envs/               Terraform ROOTS, grouped by LIFECYCLE (not app env)
   global/           long-lived apply-once: OIDC + dns zone + buckets + budgets
   k3s-dev/          the daily k3s cluster: network + compute

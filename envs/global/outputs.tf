@@ -40,3 +40,10 @@ output "planartifacts_bucket_name" {
   description = "Plan-artifacts bucket (→ gha-iac-plan role, Ansible SSM transfer)."
   value       = module.storage.planartifacts_bucket_name
 }
+
+# --- MIN-83: Session Manager preferences --------------------------------------
+
+output "ssm_idle_session_timeout_minutes" {
+  description = "Applied Session Manager idle timeout (minutes) — verify with: aws ssm get-document --name SSM-SessionManagerRunShell."
+  value       = module.session_manager_prefs.idle_session_timeout_minutes
+}

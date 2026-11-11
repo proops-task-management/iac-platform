@@ -100,6 +100,12 @@ variable "alert_email" {
   description = "Email subscribed to budget alerts."
 }
 
+variable "ssm_idle_session_timeout_minutes" {
+  type        = number
+  default     = 60
+  description = "Session Manager idle timeout in minutes (MIN-83). 60 is the AWS maximum; the AWS default without a preferences document is 20, which closes the k3s API tunnel during ordinary pauses."
+}
+
 variable "iac_apply_actions" {
   type = list(string)
   default = [
