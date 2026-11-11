@@ -24,6 +24,7 @@ PROJECT="${PROJECT:-proops-taskmgmt}"
 REGION="${REGION:-ap-southeast-1}"
 DOMAIN="${DOMAIN:-taskmgmt.dpdns.org}"
 # App-ingress names only. `k8s` was removed with MIN-50: the API is not served on a name.
+# Keep in lockstep with cluster-down.sh's SUBDOMAINS: it deletes exactly these names (MIN-84).
 SUBDOMAINS=(app api argocd grafana)
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TUNNEL="$SCRIPT_DIR/k8s-tunnel.sh"
@@ -151,6 +152,10 @@ CHANGE_ID="$(aws route53 change-resource-record-sets --hosted-zone-id "$ZONE_ID"
 # the same run used k8s.<domain> as the kubeconfig address. That dependency no longer exists.)
 log "waiting for the Route 53 change to be INSYNC…"
 aws route53 wait resource-record-sets-changed --id "$CHANGE_ID"
+# Remember WHICH IP the records point at (MIN-84). cluster-down.sh deletes a record only when its
+# value equals this cluster's IP, and a stopped server has no public IP left to compare against
+# (e.g. after the 23:00 auto-stop), so the value must be recorded while it is still known.
+printf '%s\n' "$PUBLIC_IP" > "$ARTIFACTS/last-up-ip"
 
 # 5) Configure the nodes (Plays 1-3: OS baseline, k3s server, k3s agent). Idempotent; the
 #    k3s-server role writes the kubeconfig artifact targeting 127.0.0.1 (the tunnel's end).

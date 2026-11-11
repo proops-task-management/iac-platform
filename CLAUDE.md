@@ -109,7 +109,9 @@ scripts/            daily-ops bash suite (IRD-014 standards)
 - `terraform apply` from a laptop against a metered root without the operator confirming the meter.
 - Auto-run any stateful command (terraform/aws/ansible/kubectl) — present it, ask, wait (repo CLAUDE.md rule).
 - Name a module after a resource type (`ec2`,`s3`) or a root after an app-env (`dev` without the cluster flavor).
-- Manage the daily DNS **A records** in Terraform — `cluster-up.sh` upserts them (node IP changes daily).
+- Manage the daily DNS **A records** in Terraform — `cluster-up.sh` upserts them (node IP changes daily)
+  and `cluster-down.sh` deletes the ones pointing at this cluster's IP: they exist only while the
+  cluster is up (MIN-84, subdomain takeover). Run `cluster-down.sh` before `terraform destroy`.
 
 ---
 
